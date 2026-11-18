@@ -1,0 +1,24 @@
+[project]
+name = "cavebear"
+version = "0.0.1"
+description = "Specs and reference implementations for interacting with CAVE data lakehouse table layouts"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "mmh3",
+    "obstore",
+]
+
+[dependency-groups]
+dev = [
+    "deltalake",
+    "numpy",
+    "pyarrow",
+    "pyiceberg-core",
+    "pytest",
+]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"

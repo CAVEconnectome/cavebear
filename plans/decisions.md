@@ -11,6 +11,6 @@ Upcoming Delta-based additions to the CAVE stack will lay out tables using deter
 - Agreed: Layout metadata is table-level: every file in a table shares one layout, because changing a layout in Delta means rewriting all the data anyway.
   - Agreed: Layout metadata has exactly one source of truth. It lives either in the table metadata or in a sidecar, never in both.
   - TODO: Define a standard for where to put this metadata, for both ID and spatial transforms, because Delta has no equivalent place.
-- Agreed: A small `cistern` library will provide a core with test tables and reference implementations, plus optional backends such as `polars` or `duckdb`.
+- Agreed: A small `cavebear` library will provide a core with test tables and reference implementations, plus optional backends such as `polars` or `duckdb`.
   - Agreed: It will include optional tooling for the full table lifecycle: creating a new table with a given spec, writing to it correctly (for example, computing the partition columns with an expression before writing), and reading from it efficiently (for example, adding the partition column to a join or pushing down a filter).
 - Agreed: Bucket values are stored in the data as real partition columns. They compress to almost nothing, and they let generic engines like Polars and DuckDB prune files, which is a requirement.

@@ -1,18 +1,18 @@
-# cistern
+# cavebear
 
 CAVE 🤝 data lakehouse
 
 ## Why
 
-The [Connectome Annotation Versioning Engine (CAVE)](https://github.com/CAVEconnectome) is increasingly going to use [data lakehouse](https://www.databricks.com/blog/what-is-data-lakehouse)-style tooling such as [Delta Lake](https://delta.io/) or [Apache Iceberg](https://iceberg.apache.org/).
+The [Connectome Annotation Versioning Engine (CAVE)](https://github.com/CAVEconnectome) is increasingly going to use [data lakehouse](https://www.databricks.com/blog/what-is-data-lakehouse)-style tooling such as [Delta Lake](https://delta.io/) or [Apache Iceberg](https://iceberg.apache.org/). These tools store large tables in parquet files written to object storage, but in a manner that makes them queryable and updatable by a variety of tools.
 
 Part of the advantage of these approaches is that they allow us to leverage client-side
-query engines (such as [Polars](https://pola.rs/) or [DuckDB](https://duckdb.org/)) to handle much of the compute associated with readin and writing data. This means that we don't have to write these complicated tools from scratch
+query engines (such as [Polars](https://pola.rs/) or [DuckDB](https://duckdb.org/)) to handle much of the compute associated with reading and writing data. This means that we don't have to write these complicated tools from scratch
 and can benefit from common tooling with other applications. However, there are some small
 pieces of the CAVE stack that are still semi-unique or not well supported by these tools,
 such as how hashing functions or spatial chunking are handled.
 
-`cistern` therefore has two goals: 1) to document specs for these standards and
+`cavebear` therefore has two goals: 1) to document specs for these standards and
 serve as a reference implementation thereof (a concrete example is a spec for how to hash
 long IDs (like root IDs) for partitioning), and 2) to provide lightweight utility functions
 and adapters that let query engines leverage any of these new standards without the user

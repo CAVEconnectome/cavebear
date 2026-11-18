@@ -45,22 +45,46 @@ Because `n_buckets` is a power of two, `bucket = h & (n_buckets - 1)`.
 
 ## Test vectors
 
-| value | `murmur3_x86_32` | `n_buckets` | bucket |
-| ----- | ---------------- | ------------- | ------ |
-| `34`  | `2017239379`     | `16`          | `3`    |
+Each row gives a value, the signed 32-bit hash, and the bucket for three values of
+`n_buckets`. For a negative value, the row also gives its `uint64` view. A `uint64`
+value and its `int64` view have the same bucket.
 
-The hash value matches Iceberg spec Appendix B.
+| value                  | `uint64` view        | `murmur3_x86_32` | 16  | 64  | 1024 |
+| ---------------------- | -------------------- | ---------------- | --- | --- | ---- |
+| `0`                    |                      | `1669671676`     | 12  | 60  | 764  |
+| `1`                    |                      | `1392991556`     | 4   | 4   | 324  |
+| `34`                   |                      | `2017239379`     | 3   | 19  | 339  |
+| `-34`                  | `2**64 - 34`         | `-2117612851`    | 13  | 13  | 717  |
+| `-1`                   | `2**64 - 1`          | `1651860712`     | 8   | 40  | 232  |
+| `2**63 - 1`            |                      | `-2106506049`    | 15  | 63  | 191  |
+| `-2**63`               | `2**63`              | `1366273829`     | 5   | 37  | 805  |
+| `-2401053088876216593` | `0xDEADBEEFDEADBEEF` | `-1017682423`    | 9   | 9   | 521  |
 
-TODO: add vectors for a `uint64` value `>= 2**63` and for several `n_buckets`.
+The hash of `34` matches Iceberg spec Appendix B.
+
+These implementations of the Iceberg bucket transform have test vectors that the
+table can be checked against:
+
+- Iceberg Java: `api/src/test/java/org/apache/iceberg/transforms/TestBucketing.java`
+- pyiceberg: `tests/test_transforms.py`
+- iceberg-rust: `crates/iceberg/src/transform/bucket.rs`
+- iceberg-cpp: `src/iceberg/test/bucket_util_test.cc`, with a `uint64` value
+  `>= 2**63`
+- Trino: `plugin/trino-iceberg/src/test/java/io/trino/plugin/iceberg/TestIcebergBucketing.java`,
+  with `Long.MIN_VALUE` and `Long.MAX_VALUE`
+
+`pyiceberg_core.transform.bucket` computes the transform on an Arrow array of
+`int32` or `int64` values. It rejects `uint64` arrays, so reinterpret a `uint64`
+array as `int64` before the call.
 
 ## Relation to Iceberg
 
-A cistern partition field using this transform corresponds to the Iceberg partition
+A cavebear partition field using this transform corresponds to the Iceberg partition
 field:
 
 ```json
 { "source-id": <id of source>, "name": "<column>", "transform": "bucket[<n_buckets>]" }
 ```
 
-Iceberg allows any positive `N`. Cistern requires a power of two so that buckets nest
+Iceberg allows any positive `N`. Cavebear requires a power of two so that buckets nest
 across tables.
