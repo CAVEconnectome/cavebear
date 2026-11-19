@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/cavebear-lockup.svg" alt="cavebear" height="120"></p>
+<p align="left"><img src="docs/assets/cavebear-lockup.svg" alt="cavebear" height="180"></p>
 
 CAVE 🤝 data lakehouse table formats
 
