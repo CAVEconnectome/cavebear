@@ -6,11 +6,13 @@ comes from the same snapshot as the data. This module imports no query engine.
 
 The engines meet the core at two places:
 
-- Writes take any object that exports an Arrow stream (``__arrow_c_stream__``): a
-  pyarrow table, a Polars DataFrame, a DuckDB relation. ``write`` adds the
-  partition columns batch by batch and passes the stream to ``deltalake``.
 - Reads use ``partition_values``, which turns source values into plain lists of
-  partition values. Each engine adapter puts these lists in its own filter.
+  partition values. Each engine adapter puts these lists in its own predicate.
+- Each engine adapter computes the partition columns with its own expressions, for
+  the native ``write_deltalake``. As a shortcut, ``write`` takes any object that
+  exports an Arrow stream (``__arrow_c_stream__``): a pyarrow table, a Polars
+  DataFrame, a DuckDB relation. It adds the partition columns batch by batch and
+  passes the stream to ``deltalake``.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -31,26 +33,24 @@ def partition_spec(dt: DeltaTable) -> PartitionSpec:
     """The partition spec of the snapshot ``dt``.
 
     Raises ``ValueError`` if the table has no spec, or if the spec does not describe
-    the table. The second case happens after an overwrite that changes the partition
-    columns, because the spec key survives it.
+    the table (``PartitionSpec.validate_table``).
     """
-    spec = PartitionSpec.from_configuration(dt.metadata().configuration)
+    metadata = dt.metadata()
+    spec = PartitionSpec.from_configuration(metadata.configuration)
     if spec is None:
         raise ValueError(f"{dt.table_uri} has no cavebear partition spec ({CONFIG_KEY!r} is not set)")
-    schema = _arrow_schema(dt)
-    partition_columns = set(dt.metadata().partition_columns)
-    for f in spec.fields:
-        if f.name not in partition_columns:
-            raise ValueError(f"partition spec field {f.name!r} is not a partition column")
-        # The type of an unknown transform is unknown, so only known fields are checked.
-        if f.known and schema.field(f.name).type != f.transform.PARTITION_TYPE:
-            raise ValueError(f"partition column {f.name!r} is not {f.transform.PARTITION_TYPE}")
-        if f.source not in schema.names:
-            raise ValueError(f"source column {f.source!r} of {f.name!r} is not in the table")
+    spec.validate_table(_arrow_schema(dt), metadata.partition_columns)
     return spec
 
 
-def partition_values(dt: DeltaTable, where: Mapping[str, Sequence[int]]) -> dict[str, list[int]]:
+def as_partition_spec(table: DeltaTable | PartitionSpec) -> PartitionSpec:
+    """``table`` itself if it is a partition spec, or else its partition spec."""
+    return table if isinstance(table, PartitionSpec) else partition_spec(table)
+
+
+def partition_values(
+    table: DeltaTable | PartitionSpec, where: Mapping[str, Sequence[int]]
+) -> dict[str, list[int]]:
     """The partition values that can hold the rows of a filter.
 
     ``where`` maps a source column to the values that a read keeps. The result maps
@@ -59,7 +59,7 @@ def partition_values(dt: DeltaTable, where: Mapping[str, Sequence[int]]) -> dict
     also filter the source column itself, because one partition holds many source
     values.
     """
-    spec = partition_spec(dt)
+    spec = as_partition_spec(table)
     out: dict[str, list[int]] = {}
     for source, values in where.items():
         keys = to_arrow_int64(values)
@@ -69,7 +69,7 @@ def partition_values(dt: DeltaTable, where: Mapping[str, Sequence[int]]) -> dict
     return out
 
 
-def create(
+def create_delta(
     uri: str | Path,
     schema: Any,
     spec: PartitionSpec,
@@ -81,23 +81,14 @@ def create(
 
     ``schema`` is the schema of the data that you will write, without the partition
     columns of the spec: anything that ``pyarrow.schema`` accepts. The partition
-    columns are added with the type that each transform defines. ``partition_by`` sets the order of the partition
-    columns. It must name every field of the spec, and it can add ordinary partition
-    columns. The default is the spec fields, in order.
+    columns are added with the type that each transform defines. ``partition_by`` sets
+    the order of the partition columns. It must name every field of the spec, and it
+    can add ordinary partition columns. The default is the spec fields, in order.
     """
-    spec.require_known()
-    schema = pa.schema(schema)
-    for f in spec.fields:
-        if f.name in schema.names:
-            raise ValueError(f"the schema already has the partition column {f.name!r}")
-        if f.source not in schema.names or not pa.types.is_integer(schema.field(f.source).type):
-            raise ValueError(f"source column {f.source!r} must be an integer column of the schema")
-    schema = pa.schema([*schema, *(pa.field(f.name, f.transform.PARTITION_TYPE) for f in spec.fields)])
-    names = [f.name for f in spec.fields]
-    partition_by = list(partition_by) if partition_by is not None else names
-    missing = set(names) - set(partition_by)
-    if missing:
-        raise ValueError(f"partition_by must include the partition columns {sorted(missing)}")
+    schema = spec.add_partition_columns(pa.schema(schema))
+    partition_by = list(partition_by) if partition_by is not None else [f.name for f in spec.fields]
+    # Check the table before it exists, with the same check as a reader.
+    spec.validate_table(schema, partition_by)
     return DeltaTable.create(
         str(uri),
         schema,
@@ -111,11 +102,7 @@ def create(
 def _with_partitions(
     reader: pa.RecordBatchReader, spec: PartitionSpec, target: pa.Schema
 ) -> pa.RecordBatchReader:
-    for f in spec.fields:
-        if f.name in reader.schema.names:
-            raise ValueError(f"the data already has the partition column {f.name!r}; cavebear computes it")
-    partition_fields = [pa.field(f.name, f.transform.PARTITION_TYPE) for f in spec.fields]
-    schema = pa.schema([*reader.schema, *partition_fields])
+    schema = spec.add_partition_columns(reader.schema)
     if set(schema.names) == set(target.names):
         schema = pa.schema([schema.field(name) for name in target.names])
 
@@ -149,7 +136,6 @@ def write(
     if not isinstance(table, DeltaTable):
         table = DeltaTable(str(table), storage_options=storage_options)
     spec = partition_spec(table)
-    spec.require_known()
     reader = _with_partitions(pa.RecordBatchReader.from_stream(data), spec, _arrow_schema(table))
     write_deltalake(table, reader, mode=mode)
     return table

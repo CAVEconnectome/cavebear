@@ -1,37 +1,28 @@
-"""Polars adapter: scans with partition pruning, and transforms as expressions.
+"""Polars adapter: transforms and predicates as Polars expressions.
+
+The expressions plug into the native Polars and deltalake calls::
+
+    write_deltalake(dt, df.with_columns(partition_columns(dt)), mode="append")
+    pl.scan_delta(dt).filter(predicate(dt, {"post_pt_root_id": roots}))
+
+``scan_partitionwise`` builds the filtered scans of each step of a partition-wise
+join.
 
 This adapter calls Polars directly, not narwhals. Narwhals cannot express the parts
 that differ by engine (see "no narwhals" in plans/decisions.md).
 """
 
+import operator
 from collections.abc import Iterator, Mapping, Sequence
+from functools import reduce
 
 import polars as pl
 import pyarrow as pa
 from deltalake import DeltaTable
 
-from .table import iter_partitionwise, partition_values
+from .partition_spec import PartitionSpec
+from .table import as_partition_spec, iter_partitionwise, partition_values
 from .transforms import IcebergBucket, to_arrow_int64
-
-
-def _source_filter(column: str, values: Sequence[int]) -> pl.Expr:
-    # uint64 values >= 2**63 become their int64 view, as Delta stores them.
-    return pl.col(column).is_in(to_arrow_int64(values).to_pylist())
-
-
-def scan(dt: DeltaTable, where: Mapping[str, Sequence[int]] | None = None) -> pl.LazyFrame:
-    """A lazy scan of the snapshot ``dt``, filtered to ``where``.
-
-    ``where`` maps source columns to the values to keep. The scan filters on the
-    partition values of those values, so that Polars opens only their files, and on
-    the source columns, so that only the matching rows stay.
-    """
-    lf = pl.scan_delta(dt)
-    if not where:
-        return lf
-    predicates = [pl.col(name).is_in(values) for name, values in partition_values(dt, where).items()]
-    predicates += [_source_filter(column, values) for column, values in where.items()]
-    return lf.filter(*predicates)
 
 
 def partition_expr(expr: pl.Expr | str, transform: IcebergBucket) -> pl.Expr:
@@ -49,6 +40,39 @@ def partition_expr(expr: pl.Expr | str, transform: IcebergBucket) -> pl.Expr:
     )
 
 
+def partition_columns(table: DeltaTable | PartitionSpec) -> list[pl.Expr]:
+    """One expression per partition field of ``table``, named as its partition column.
+
+    ``table`` is a ``DeltaTable`` or its partition spec. Pass the result to
+    ``with_columns`` on a frame that has the source columns, then write the frame
+    with ``write_deltalake``.
+    """
+    spec = as_partition_spec(table)
+    spec.require_known()
+    return [partition_expr(f.source, f.transform).alias(f.name) for f in spec.fields]
+
+
+def _in(column: str, values: Sequence[int]) -> pl.Expr:
+    return pl.col(column).is_in(list(values))
+
+
+def _source_values(values: Sequence[int]) -> list[int]:
+    # uint64 values >= 2**63 become their int64 view, as Delta stores them.
+    return [v for v in to_arrow_int64(values).to_pylist() if v is not None]
+
+
+def predicate(table: DeltaTable | PartitionSpec, where: Mapping[str, Sequence[int]]) -> pl.Expr:
+    """A filter that keeps the rows whose source columns have the values in ``where``.
+
+    ``where`` maps source columns to the values to keep. The filter tests the
+    partition columns, so that ``pl.scan_delta`` opens only the matching files, and
+    the source columns, so that only the matching rows stay.
+    """
+    predicates = [_in(name, v) for name, v in partition_values(table, where).items()]
+    predicates += [_in(column, _source_values(values)) for column, values in where.items()]
+    return reduce(operator.and_, predicates) if predicates else pl.lit(True)
+
+
 def scan_partitionwise(
     tables: Sequence[DeltaTable], on: str | Sequence[str], n: int | None = None
 ) -> Iterator[tuple[int, list[pl.LazyFrame]]]:
@@ -59,6 +83,6 @@ def scan_partitionwise(
     """
     for value, filters in iter_partitionwise(tables, on, n):
         yield value, [
-            scan(dt).filter(*(pl.col(name).is_in(v) for name, v in nested.items()))
+            pl.scan_delta(dt).filter(*(_in(name, v) for name, v in nested.items()))
             for dt, nested in zip(tables, filters)
         ]

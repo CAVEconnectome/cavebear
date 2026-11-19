@@ -11,11 +11,11 @@ from cavebear import polars as cpl  # noqa: E402
 from conftest import synapses  # noqa: E402
 
 
-def test_scan_matches_plain_filter_and_prunes(make_table):
+def test_predicate_matches_plain_filter_and_prunes(make_table):
     data = synapses()
     table = make_table("t", 16, data)
     roots = data.column("root_id").to_pylist()[::150]
-    lf = cpl.scan(table, {"root_id": roots})
+    lf = pl.scan_delta(table).filter(cpl.predicate(table, {"root_id": roots}))
     expected = pl.DataFrame(data).filter(pl.col("root_id").is_in(roots))
     got = lf.collect().drop("root_id_bucket")
     assert got.sort("root_id", "value").equals(expected.sort("root_id", "value"))
@@ -32,11 +32,6 @@ def files_scanned(lf) -> int:
     return scan.count(".parquet") + (int(other.group(1)) if other else 0)
 
 
-def test_scan_without_filter(make_table):
-    table = make_table("t", 4, synapses(10))
-    assert cpl.scan(table).collect().height == 30
-
-
 def test_partition_expr():
     df = pl.DataFrame({"x": pl.Series([34, 0, None, -34], dtype=pl.Int64)})
     got = df.select(cpl.partition_expr("x", IcebergBucket(16))).to_series()
@@ -49,7 +44,7 @@ def test_partition_expr():
 def test_write_from_polars(make_table):
     table = make_table("t", 8)
     table = cavebear.write(table, pl.DataFrame(synapses(20)))
-    assert cpl.scan(table).collect().height == 60
+    assert pl.scan_delta(table).collect().height == 60
 
 
 def test_scan_partitionwise(make_table):
@@ -57,7 +52,7 @@ def test_scan_partitionwise(make_table):
     data = synapses(300, per_root=3, seed=1)
     left = make_table("left", 64, data)
     right = make_table("right", 128, data)
-    full = cpl.scan(left).join(cpl.scan(right), on="root_id").collect()
+    full = pl.scan_delta(left).join(pl.scan_delta(right), on="root_id").collect()
     parts = []
     for value, (lf_left, lf_right) in cpl.scan_partitionwise([left, right], on="root_id"):
         assert value < 64
@@ -73,3 +68,27 @@ def test_scan_partitionwise_rejects_tables_without_fields(make_table):
     table = make_table("t", 8)
     with pytest.raises(ValueError, match="no iceberg_bucket field"):
         next(cpl.scan_partitionwise([table], on="value", n=4))
+
+
+def test_native_write(make_table):
+    from deltalake import write_deltalake
+
+    data = synapses()
+    table = make_table("t", 16)
+    df = pl.DataFrame(data)
+    write_deltalake(table, df.with_columns(cpl.partition_columns(table)), mode="append")
+    # The same partition columns as the shortcut write.
+    expected_table = make_table("expected", 16, data)
+    columns = ["root_id", "value", "root_id_bucket"]
+    got_all = pl.scan_delta(table).collect().select(columns).sort(columns)
+    assert got_all.equals(pl.scan_delta(expected_table).collect().select(columns).sort(columns))
+
+
+def test_expressions_take_a_spec():
+    from conftest import spec
+
+    df = pl.DataFrame({"root_id": pl.Series([34, 0, None], dtype=pl.Int64)})
+    df = df.with_columns(cpl.partition_columns(spec(16)))
+    assert df["root_id_bucket"].to_list() == [3, 12, None]
+    assert df.filter(cpl.predicate(spec(16), {"root_id": [34]})).height == 1
+    assert df.filter(cpl.predicate(spec(16), {})).height == 3

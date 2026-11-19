@@ -33,9 +33,9 @@ members:
 
 `preshift_bits + minishard_bits + shard_bits` must not exceed 64.
 
-The family members (see [layout.md](./layout.md#nesting)) are `"hash"`,
+The family members (see [partition_spec.md](./partition_spec.md#nesting)) are `"hash"`,
 `"preshift_bits"` and `"minishard_bits"`. Two partition fields using this transform
-are nesting-compatible only if all three are equal; only `"shard_bits"` may differ.
+nest only if all three are equal; only `"shard_bits"` may differ.
 
 ## Source types
 

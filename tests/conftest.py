@@ -28,7 +28,7 @@ def make_table(tmp_path):
     """A function that creates a table with ``n_buckets`` and writes ``data`` to it."""
 
     def make(name: str, n_buckets: int, data: pa.Table | None = None) -> DeltaTable:
-        table = cavebear.create(tmp_path / name, SCHEMA, spec(n_buckets))
+        table = cavebear.create_delta(tmp_path / name, SCHEMA, spec(n_buckets))
         return table if data is None else cavebear.write(table, data)
 
     return make

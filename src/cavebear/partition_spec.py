@@ -5,8 +5,11 @@ See ``docs/specs/partition_spec.md``. The spec is stored as a JSON string under
 """
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
+
+import pyarrow as pa
 
 from .transforms import Transform, UnknownTransform, parse_transform
 
@@ -26,6 +29,22 @@ class PartitionField:
     def known(self) -> bool:
         """Whether this version of cavebear can compute and prune on this field."""
         return not isinstance(self.transform, UnknownTransform)
+
+    def arrow_field(self) -> pa.Field:
+        """The Arrow field of the partition column. The field must be known."""
+        return pa.field(self.name, self.transform.PARTITION_TYPE)
+
+    def check_source(self, schema: pa.Schema) -> None:
+        """Raise ``ValueError`` if ``schema`` has no source column that the transform
+        accepts. For an unknown transform, only check that the column exists."""
+        if self.source not in schema.names:
+            raise ValueError(f"source column {self.source!r} of {self.name!r} is not in the schema")
+        source_type = schema.field(self.source).type
+        if self.known and not self.transform.can_transform(source_type):
+            raise ValueError(
+                f"source column {self.source!r} has type {source_type}, "
+                f"which {self.transform.TYPE!r} does not accept"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "source": self.source, "transform": self.transform.to_dict()}
@@ -68,6 +87,38 @@ class PartitionSpec:
         unknown = [f"{f.name} ({f.transform.TYPE!r})" for f in self.fields if not f.known]
         if unknown:
             raise ValueError(f"cannot write fields with unknown transforms: {unknown}")
+
+    def add_partition_columns(self, schema: pa.Schema) -> pa.Schema:
+        """``schema`` with the partition columns of the spec added at the end.
+
+        ``schema`` is the schema of data to write, which has the source columns but
+        not the partition columns, because cavebear computes them. Raises
+        ``ValueError`` if a transform is unknown, if ``schema`` already has a partition
+        column, or if a transform does not accept its source column.
+        """
+        self.require_known()
+        for f in self.fields:
+            if f.name in schema.names:
+                raise ValueError(f"the data already has the partition column {f.name!r}; cavebear computes it")
+            f.check_source(schema)
+        return pa.schema([*schema, *(f.arrow_field() for f in self.fields)])
+
+    def validate_table(self, schema: pa.Schema, partition_columns: Sequence[str]) -> None:
+        """Raise ``ValueError`` if the spec does not describe a table.
+
+        ``schema`` is the full schema of the table, and ``partition_columns`` its Delta
+        partition columns. Each field must name a partition column, and its source
+        must be a column of the table. For a known transform, the partition column
+        must also have the type that the transform defines, and the transform must
+        accept the source column. A table fails this check after an overwrite that
+        changes its partition columns, because the spec key survives it.
+        """
+        for f in self.fields:
+            if f.name not in partition_columns:
+                raise ValueError(f"partition spec field {f.name!r} is not a partition column")
+            f.check_source(schema)
+            if f.known and schema.field(f.name).type != f.transform.PARTITION_TYPE:
+                raise ValueError(f"partition column {f.name!r} is not {f.transform.PARTITION_TYPE}")
 
     def to_dict(self) -> dict[str, Any]:
         return {"@type": SPEC_TYPE, "fields": [field.to_dict() for field in self.fields]}

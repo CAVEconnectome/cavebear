@@ -17,8 +17,8 @@ The transform object has the following members:
 - `"n_buckets"`: Integer. The number of buckets. Must be a power of two in the range
   `[1, 2**30]`.
 
-There are no family members (see [layout.md](./layout.md#nesting)), so any two
-`iceberg_bucket` partition fields are nesting-compatible.
+There are no family members (see [partition_spec.md](./partition_spec.md#nesting)), so any two
+`iceberg_bucket` partition fields nest.
 
 ## Source types
 

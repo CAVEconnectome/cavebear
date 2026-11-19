@@ -20,7 +20,7 @@ def make_data(n=1000, seed=0) -> pa.Table:
 
 @pytest.fixture
 def table(tmp_path) -> DeltaTable:
-    return cavebear.create(tmp_path / "table", SCHEMA, SPEC)
+    return cavebear.create_delta(tmp_path / "table", SCHEMA, SPEC)
 
 
 def test_create(table):
@@ -62,12 +62,14 @@ def test_write_rejects_bucket_columns(table):
 
 
 def test_create_rejects_bad_schemas(tmp_path):
-    with pytest.raises(ValueError, match="integer column"):
-        cavebear.create(tmp_path / "a", pa.schema([("value", pa.float64())]), SPEC)
+    with pytest.raises(ValueError, match="not in the schema"):
+        cavebear.create_delta(tmp_path / "a", pa.schema([("value", pa.float64())]), SPEC)
+    with pytest.raises(ValueError, match="does not accept"):
+        cavebear.create_delta(tmp_path / "f", pa.schema([("root_id", pa.float64())]), SPEC)
     with pytest.raises(ValueError, match="already has the partition column"):
-        cavebear.create(tmp_path / "b", SCHEMA.append(pa.field("root_id_bucket", pa.int32())), SPEC)
-    with pytest.raises(ValueError, match="partition_by"):
-        cavebear.create(tmp_path / "c", SCHEMA, SPEC, partition_by=["value"])
+        cavebear.create_delta(tmp_path / "b", SCHEMA.append(pa.field("root_id_bucket", pa.int32())), SPEC)
+    with pytest.raises(ValueError, match="not a partition column"):
+        cavebear.create_delta(tmp_path / "c", SCHEMA, SPEC, partition_by=["value"])
 
 
 def test_open_rejects_plain_and_stale_tables(tmp_path, table):
@@ -93,7 +95,7 @@ def test_spec_of_an_old_version(table):
 def test_partition_values(tmp_path):
     # The test vectors of docs/specs/iceberg_bucket.md, with n_buckets = 16.
     spec = PartitionSpec((PartitionField("b", "root_id", IcebergBucket(16)),))
-    table = cavebear.create(tmp_path / "sixteen", SCHEMA, spec)
+    table = cavebear.create_delta(tmp_path / "sixteen", SCHEMA, spec)
     values = cavebear.partition_values
     assert values(table, {"root_id": [34, 0, 2**64 - 34]}) == {"b": [3, 12, 13]}
     assert values(table, {"root_id": [34, None]}) == {"b": [3]}

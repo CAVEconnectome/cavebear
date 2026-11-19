@@ -78,7 +78,7 @@ def test_cross_engine(make_table):
     # Written with DuckDB, read with Polars.
     b = cavebear.write(make_table("b", 16), con.from_arrow(data))
     from_duckdb = sorted_rows(cdd.scan(con, a, {"root_id": roots}))
-    from_polars = sorted(cpl.scan(b, {"root_id": roots}).collect().rows())
+    from_polars = sorted(pl.scan_delta(b).filter(cpl.predicate(b, {"root_id": roots})).collect().rows())
     assert from_duckdb == from_polars
     assert len(from_duckdb) == 6
 
@@ -95,3 +95,36 @@ def test_scan_partitionwise(make_table):
     for _, (l, r) in cdd.scan_partitionwise(con, [left, right], on="root_id"):
         total += l.join(r, "root_id").count("*").fetchall()[0][0]
     assert total == full == 100 * 3 * 3
+
+
+def test_native_write_and_scan(make_table):
+    from deltalake import write_deltalake
+
+    con = duckdb.connect()
+    cdd.register(con)
+    data = synapses()
+    table = make_table("t", 16)
+    con.register("synapses", data)
+    query = f"SELECT *, {cdd.partition_columns(table)} FROM synapses"
+    write_deltalake(table, con.sql(query), mode="append")
+    # The same partition columns as the shortcut write.
+    expected_table = make_table("expected", 16, data)
+    assert sorted_rows(table.to_pyarrow_table()) == sorted_rows(expected_table.to_pyarrow_table())
+
+    roots = data.column("root_id").to_pylist()[::150]
+    uri = table.table_uri
+    relation = con.sql(
+        f"SELECT root_id, value FROM delta_scan('{uri}') WHERE {cdd.predicate(table, {'root_id': roots})}"
+    )
+    expected = data.filter(pa.compute.is_in(data.column("root_id"), pa.array(roots)))
+    assert sorted_rows(relation) == sorted_rows(expected)
+    n_buckets = len(cavebear.partition_values(table, {"root_id": roots})["root_id_bucket"])
+    assert files_read(con, relation) == n_buckets < 16
+
+
+def test_expressions_take_a_spec():
+    from conftest import spec
+
+    assert cdd.partition_columns(spec(16)) == 'cave_iceberg_bucket("root_id", 16) AS "root_id_bucket"'
+    assert cdd.predicate(spec(16), {"root_id": [34]}) == '"root_id_bucket" IN (3) AND "root_id" IN (34)'
+    assert cdd.predicate(spec(16), {}) == "TRUE"

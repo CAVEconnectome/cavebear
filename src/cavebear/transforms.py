@@ -2,10 +2,16 @@
 
 Each transform is a frozen dataclass whose ``to_dict`` gives the transform object
 of a partition spec (``docs/specs/partition_spec.md``), with an ``"@type"`` member
-that names it. Each known transform has ``apply(values)``, which maps an integer
-Arrow array to an array of partition values, and ``PARTITION_TYPE``, the Arrow type
-of those values and of the partition column. Each transform spec defines that type.
-The generic code in ``cavebear.table`` and the engine adapters use only these two.
+that names it. Each known transform has:
+
+- ``apply(values)``, which maps an integer Arrow array to an array of partition values.
+- ``PARTITION_TYPE``, the Arrow type of those values and of the partition column.
+  Each transform spec defines that type.
+- ``can_transform(source_type)``, which says whether the transform accepts a source
+  column of an Arrow type. Iceberg uses the same name.
+
+The generic code in ``cavebear.partition_spec``, ``cavebear.table`` and the engine
+adapters uses only these three.
 """
 
 import struct
@@ -109,6 +115,11 @@ class IcebergBucket:
         n = self.n_buckets
         if type(n) is not int or n < 1 or n > MAX_N_BUCKETS or n & (n - 1):
             raise ValueError(f"n_buckets must be a power of two in [1, 2**30], got {n!r}")
+
+    @staticmethod
+    def can_transform(source_type: pa.DataType) -> bool:
+        """Whether the transform accepts a source column of ``source_type``."""
+        return pa.types.is_integer(source_type)
 
     def bucket(self, value: int) -> int:
         """The bucket number for an integer source value.

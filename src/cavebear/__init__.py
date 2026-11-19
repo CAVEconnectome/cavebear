@@ -2,7 +2,7 @@
 
 from .partition_spec import CONFIG_KEY, PartitionField, PartitionSpec
 from .table import (
-    create,
+    create_delta,
     iter_partitionwise,
     nested_partitions,
     partition_spec,
@@ -17,7 +17,7 @@ __all__ = [
     "PartitionField",
     "PartitionSpec",
     "UnknownTransform",
-    "create",
+    "create_delta",
     "iter_partitionwise",
     "nested_partitions",
     "partition_spec",

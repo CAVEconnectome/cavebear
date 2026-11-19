@@ -1,4 +1,13 @@
-"""DuckDB adapter: scans with partition pruning, and the bucket transform as a SQL function.
+"""DuckDB adapter: transforms and predicates as DuckDB SQL.
+
+The SQL plugs into the native DuckDB and deltalake calls::
+
+    register(con)
+    query = f"SELECT *, {partition_columns(dt)} FROM synapses"
+    write_deltalake(dt, con.sql(query), mode="append")
+    con.sql(f"SELECT * FROM delta_scan('{uri}') WHERE {predicate(dt, where)}")
+
+``scan`` and ``scan_partitionwise`` are shortcuts for the second form.
 
 The scans use ``delta_scan(uri, version => n)`` at the version of the given
 ``DeltaTable``, so DuckDB reads the same snapshot as the partition spec. The filters
@@ -11,7 +20,8 @@ import duckdb
 import pyarrow as pa
 from deltalake import DeltaTable
 
-from .table import iter_partitionwise, partition_values
+from .partition_spec import PartitionSpec
+from .table import as_partition_spec, iter_partitionwise, partition_values
 from .transforms import IcebergBucket, to_arrow_int64
 
 #: The name of the SQL function that ``register`` adds.
@@ -50,6 +60,40 @@ def _in(column: str, values: Sequence[int]) -> str:
     return f"{_quote_identifier(column)} IN ({literals})" if values else "FALSE"
 
 
+def partition_columns(table: DeltaTable | PartitionSpec) -> str:
+    """A SQL select list with one expression per partition field of ``table``.
+
+    ``table`` is a ``DeltaTable`` or its partition spec. Each expression calls the
+    function that ``register`` adds, and is named as its partition column. Put the
+    result after ``SELECT *,`` in a query on rows that have the source columns, then
+    write the relation with ``write_deltalake``.
+    """
+    spec = as_partition_spec(table)
+    spec.require_known()
+    return ", ".join(
+        f"{FUNCTION}({_quote_identifier(f.source)}, {f.transform.n_buckets}) "
+        f"AS {_quote_identifier(f.name)}"
+        for f in spec.fields
+    )
+
+
+def predicate(table: DeltaTable | PartitionSpec, where: Mapping[str, Sequence[int]]) -> str:
+    """A SQL condition that keeps the rows whose source columns have the values in
+    ``where``.
+
+    ``where`` maps source columns to the values to keep. The condition tests the
+    partition columns, so that ``delta_scan`` opens only the matching files, and the
+    source columns, so that only the matching rows stay. The values are literal
+    ``IN`` lists, so that DuckDB pushes them into the scan.
+    """
+    predicates = [_in(name, v) for name, v in partition_values(table, where).items()]
+    predicates += [
+        _in(column, [v for v in to_arrow_int64(values).to_pylist() if v is not None])
+        for column, values in where.items()
+    ]
+    return " AND ".join(predicates) if predicates else "TRUE"
+
+
 def _scan_sql(dt: DeltaTable, predicates: Sequence[str]) -> str:
     uri = dt.table_uri.replace("'", "''")
     sql = f"SELECT * FROM delta_scan('{uri}', version => {dt.version()})"
@@ -61,20 +105,9 @@ def scan(
     dt: DeltaTable,
     where: Mapping[str, Sequence[int]] | None = None,
 ) -> duckdb.DuckDBPyRelation:
-    """A relation on the snapshot ``dt``, filtered to ``where``.
-
-    ``where`` maps source columns to the values to keep. The relation filters on the
-    partition values of those values, so that DuckDB opens only their files, and on the
-    source columns, so that only the matching rows stay.
-    """
-    predicates = []
-    if where:
-        predicates += [_in(name, v) for name, v in partition_values(dt, where).items()]
-        predicates += [
-            _in(column, [v for v in to_arrow_int64(values).to_pylist() if v is not None])
-            for column, values in where.items()
-        ]
-    return con.sql(_scan_sql(dt, predicates))
+    """A ``delta_scan`` relation on the snapshot ``dt``, filtered with
+    ``predicate(dt, where)``."""
+    return con.sql(_scan_sql(dt, [predicate(dt, where)] if where else []))
 
 
 def scan_partitionwise(
