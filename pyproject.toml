@@ -25,6 +25,7 @@ duckdb = ["duckdb>=2.0"]
 [dependency-groups]
 dev = [
     "duckdb>=2.0.0",
+    "ipykernel>=7.4.0",
     "polars>=2.1.0",
     "pyiceberg-core",
     "pytest",

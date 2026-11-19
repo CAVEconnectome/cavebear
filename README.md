@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/cavebear-logo.svg" alt="cavebear logo" width="300">
+</p>
+
 # cavebear
 
 CAVE 🤝 data lakehouse
