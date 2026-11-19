@@ -32,7 +32,7 @@ def test_create(table):
 
 def test_write_computes_buckets(table):
     data = make_data()
-    assert cavebear.write(table, data) is table
+    assert cavebear.write_delta(table, data) is None
     # As with write_deltalake, the DeltaTable moves to the new version.
     assert table.version() == 1
     got = table.to_pyarrow_table().sort_by("root_id")
@@ -47,8 +47,9 @@ def test_write_computes_buckets(table):
 
 
 def test_write_by_uri_and_overwrite(table):
-    cavebear.write(table.table_uri, make_data(10))
-    new = cavebear.write(table.table_uri, make_data(5, seed=1), mode="overwrite")
+    cavebear.write_delta(table.table_uri, make_data(10))
+    assert cavebear.write_delta(table.table_uri, make_data(5, seed=1), mode="overwrite") is None
+    new = DeltaTable(table.table_uri)
     assert new.to_pyarrow_table().num_rows == 5
     assert cavebear.partition_spec(new) == SPEC
     # The DeltaTable that was not passed stays at its version.
@@ -58,7 +59,7 @@ def test_write_by_uri_and_overwrite(table):
 def test_write_rejects_bucket_columns(table):
     data = make_data(3).append_column("root_id_bucket", pa.array([0, 0, 0], pa.int32()))
     with pytest.raises(ValueError, match="already has the partition column"):
-        cavebear.write(table, data)
+        cavebear.write_delta(table, data)
 
 
 def test_create_rejects_bad_schemas(tmp_path):
@@ -86,7 +87,7 @@ def test_open_rejects_plain_and_stale_tables(tmp_path, table):
 
 
 def test_spec_of_an_old_version(table):
-    cavebear.write(table, make_data(10))
+    cavebear.write_delta(table, make_data(10))
     old = DeltaTable(table.table_uri, version=0)
     assert cavebear.partition_spec(old) == SPEC
     assert old.to_pyarrow_table().num_rows == 0

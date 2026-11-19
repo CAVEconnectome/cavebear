@@ -27,8 +27,10 @@ def synapses(n_roots=200, per_root=3, seed=0) -> pa.Table:
 def make_table(tmp_path):
     """A function that creates a table with ``n_buckets`` and writes ``data`` to it."""
 
-    def make(name: str, n_buckets: int, data: pa.Table | None = None) -> DeltaTable:
+    def make(name: str, n_buckets: int, data=None) -> DeltaTable:
         table = cavebear.create_delta(tmp_path / name, SCHEMA, spec(n_buckets))
-        return table if data is None else cavebear.write(table, data)
+        if data is not None:
+            cavebear.write_delta(table, data)
+        return table
 
     return make

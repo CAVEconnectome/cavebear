@@ -5,8 +5,13 @@ The expressions plug into the native Polars and deltalake calls::
     write_deltalake(dt, df.with_columns(partition_columns(dt)), mode="append")
     pl.scan_delta(dt).filter(predicate(dt, {"post_pt_root_id": roots}))
 
-``scan_partitionwise`` builds the filtered scans of each step of a partition-wise
-join.
+For a partition-wise join, ``partitionwise_join_predicates`` gives one filter per table
+for each step, for the native scan::
+
+    for value, preds in partitionwise_join_predicates(tables, on):
+        scans = [pl.scan_delta(dt).filter(pred) for dt, pred in zip(tables, preds)]
+
+``scan_delta_partitionwise_join`` is a shortcut for the scans.
 
 This adapter calls Polars directly, not narwhals. Narwhals cannot express the parts
 that differ by engine (see "no narwhals" in plans/decisions.md).
@@ -21,7 +26,7 @@ import pyarrow as pa
 from deltalake import DeltaTable
 
 from .partition_spec import PartitionSpec
-from .table import as_partition_spec, iter_partitionwise, partition_values
+from .table import as_partition_spec, partition_values, partitionwise_join_values
 from .transforms import IcebergBucket, to_arrow_int64
 
 
@@ -73,16 +78,32 @@ def predicate(table: DeltaTable | PartitionSpec, where: Mapping[str, Sequence[in
     return reduce(operator.and_, predicates) if predicates else pl.lit(True)
 
 
-def scan_partitionwise(
+def partitionwise_join_predicates(
+    tables: Sequence[DeltaTable], on: str | Sequence[str], n: int | None = None
+) -> Iterator[tuple[int, list[pl.Expr]]]:
+    """For each step of a partition-wise join, one filter per table.
+
+    See ``cavebear.table.partitionwise_join_values``, which gives the same steps as lists of
+    partition values. Each filter keeps the partitions of its table that are nested in
+    the partition of the step, for example
+    ``pl.col("post_pt_root_id_bucket").is_in([3, 19, 35, 51])``. Put each filter on
+    ``pl.scan_delta`` of its table, and join the scans of one step.
+    """
+    for value, filters in partitionwise_join_values(tables, on, n):
+        yield value, [
+            reduce(operator.and_, (_in(name, v) for name, v in nested.items()))
+            for nested in filters
+        ]
+
+
+def scan_delta_partitionwise_join(
     tables: Sequence[DeltaTable], on: str | Sequence[str], n: int | None = None
 ) -> Iterator[tuple[int, list[pl.LazyFrame]]]:
-    """For each partition of a partition-wise join, one scan per table.
+    """For each step of a partition-wise join, one scan per table.
 
-    See ``cavebear.table.iter_partitionwise``. Join the scans of one partition, then
-    move on to the next. Memory then holds one partition at a time.
+    The scans are ``pl.scan_delta`` with the filters of ``partitionwise_join_predicates``.
+    Join the scans of one step, then move on to the next. Memory then holds one
+    partition at a time.
     """
-    for value, filters in iter_partitionwise(tables, on, n):
-        yield value, [
-            pl.scan_delta(dt).filter(*(_in(name, v) for name, v in nested.items()))
-            for dt, nested in zip(tables, filters)
-        ]
+    for value, preds in partitionwise_join_predicates(tables, on, n):
+        yield value, [pl.scan_delta(dt).filter(pred) for dt, pred in zip(tables, preds)]

@@ -24,12 +24,16 @@ def sorted_rows(relation_or_table) -> list[tuple]:
     return sorted(relation_or_table.fetchall())
 
 
-def test_scan_matches_plain_filter_and_prunes(make_table):
+def delta_scan(con, table):
+    return con.sql(f"FROM delta_scan('{table.table_uri}')")
+
+
+def test_predicate_matches_plain_filter_and_prunes(make_table):
     con = duckdb.connect()
     data = synapses()
     table = make_table("t", 16, data)
     roots = data.column("root_id").to_pylist()[::150]
-    relation = cdd.scan(con, table, {"root_id": roots})
+    relation = delta_scan(con, table).filter(cdd.predicate(table, {"root_id": roots}))
     got = relation.select("root_id, value")
     expected = data.filter(pa.compute.is_in(data.column("root_id"), pa.array(roots)))
     assert sorted_rows(got) == sorted_rows(expected)
@@ -37,14 +41,16 @@ def test_scan_matches_plain_filter_and_prunes(make_table):
     assert files_read(con, relation) == n_buckets < 16
 
 
-def test_scan_reads_the_table_version(make_table):
+def test_scan_delta_partitionwise_join_reads_the_table_version(make_table):
     con = duckdb.connect()
     table = make_table("t", 4, synapses(10))
     old = DeltaTable(table.table_uri, version=table.version())
-    cavebear.write(table, synapses(10, seed=1))
+    cavebear.write_delta(table, synapses(10, seed=1))
     # DuckDB reads the version of each DeltaTable, not the latest one.
-    assert len(cdd.scan(con, old).fetchall()) == 30
-    assert len(cdd.scan(con, table).fetchall()) == 60
+    def rows(dt):
+        return sum(len(r.fetchall()) for _, (r,) in cdd.scan_delta_partitionwise_join(con, [dt], on="root_id"))
+    assert rows(old) == 30
+    assert rows(table) == 60
 
 
 def test_registered_function():
@@ -62,8 +68,8 @@ def test_write_from_duckdb(make_table):
     con = duckdb.connect()
     table = make_table("t", 8)
     relation = con.from_arrow(synapses(20))
-    table = cavebear.write(table, relation)
-    assert len(cdd.scan(con, table).fetchall()) == 60
+    cavebear.write_delta(table, relation)
+    assert len(delta_scan(con, table).fetchall()) == 60
 
 
 def test_cross_engine(make_table):
@@ -74,25 +80,25 @@ def test_cross_engine(make_table):
     data = synapses(50)
     roots = data.column("root_id").to_pylist()[:6]
     # Written with Polars, read with DuckDB.
-    a = cavebear.write(make_table("a", 16), pl.DataFrame(data))
+    a = make_table("a", 16, pl.DataFrame(data))
     # Written with DuckDB, read with Polars.
-    b = cavebear.write(make_table("b", 16), con.from_arrow(data))
-    from_duckdb = sorted_rows(cdd.scan(con, a, {"root_id": roots}))
+    b = make_table("b", 16, con.from_arrow(data))
+    from_duckdb = sorted_rows(delta_scan(con, a).filter(cdd.predicate(a, {"root_id": roots})))
     from_polars = sorted(pl.scan_delta(b).filter(cpl.predicate(b, {"root_id": roots})).collect().rows())
     assert from_duckdb == from_polars
     assert len(from_duckdb) == 6
 
 
-def test_scan_partitionwise(make_table):
+def test_scan_delta_partitionwise_join(make_table):
     con = duckdb.connect()
     left = make_table("left", 16, synapses(100, seed=2))
     right = make_table("right", 32, synapses(100, seed=2))
     full = con.sql(
-        f"SELECT count(*) FROM ({cdd.scan(con, left).sql_query()}) l "
-        f"JOIN ({cdd.scan(con, right).sql_query()}) r USING (root_id)"
+        f"SELECT count(*) FROM ({delta_scan(con, left).sql_query()}) l "
+        f"JOIN ({delta_scan(con, right).sql_query()}) r USING (root_id)"
     ).fetchall()[0][0]
     total = 0
-    for _, (l, r) in cdd.scan_partitionwise(con, [left, right], on="root_id"):
+    for _, (l, r) in cdd.scan_delta_partitionwise_join(con, [left, right], on="root_id"):
         total += l.join(r, "root_id").count("*").fetchall()[0][0]
     assert total == full == 100 * 3 * 3
 
@@ -128,3 +134,10 @@ def test_expressions_take_a_spec():
     assert cdd.partition_columns(spec(16)) == 'cave_iceberg_bucket("root_id", 16) AS "root_id_bucket"'
     assert cdd.predicate(spec(16), {"root_id": [34]}) == '"root_id_bucket" IN (3) AND "root_id" IN (34)'
     assert cdd.predicate(spec(16), {}) == "TRUE"
+
+
+def test_partitionwise_join_predicates(make_table):
+    fine, coarse = make_table("fine", 64), make_table("coarse", 16)
+    steps = list(cdd.partitionwise_join_predicates([fine, coarse], on="root_id"))
+    assert [value for value, _ in steps] == list(range(16))
+    assert steps[3][1] == ['"root_id_bucket" IN (3, 19, 35, 51)', '"root_id_bucket" IN (3)']

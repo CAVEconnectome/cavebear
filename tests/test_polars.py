@@ -43,18 +43,18 @@ def test_partition_expr():
 
 def test_write_from_polars(make_table):
     table = make_table("t", 8)
-    table = cavebear.write(table, pl.DataFrame(synapses(20)))
+    cavebear.write_delta(table, pl.DataFrame(synapses(20)))
     assert pl.scan_delta(table).collect().height == 60
 
 
-def test_scan_partitionwise(make_table):
+def test_scan_delta_partitionwise_join(make_table):
     # bucket[128] is nested in bucket[64]: partition v of 64 holds v and v + 64 of 128.
     data = synapses(300, per_root=3, seed=1)
     left = make_table("left", 64, data)
     right = make_table("right", 128, data)
     full = pl.scan_delta(left).join(pl.scan_delta(right), on="root_id").collect()
     parts = []
-    for value, (lf_left, lf_right) in cpl.scan_partitionwise([left, right], on="root_id"):
+    for value, (lf_left, lf_right) in cpl.scan_delta_partitionwise_join([left, right], on="root_id"):
         assert value < 64
         parts.append(lf_left.join(lf_right, on="root_id").collect())
     chunked = pl.concat(parts)
@@ -64,10 +64,10 @@ def test_scan_partitionwise(make_table):
     assert chunked.select(columns).sort(columns).equals(full.select(columns).sort(columns))
 
 
-def test_scan_partitionwise_rejects_tables_without_fields(make_table):
+def test_scan_delta_partitionwise_join_rejects_tables_without_fields(make_table):
     table = make_table("t", 8)
     with pytest.raises(ValueError, match="no iceberg_bucket field"):
-        next(cpl.scan_partitionwise([table], on="value", n=4))
+        next(cpl.scan_delta_partitionwise_join([table], on="value", n=4))
 
 
 def test_native_write(make_table):
@@ -92,3 +92,12 @@ def test_expressions_take_a_spec():
     assert df["root_id_bucket"].to_list() == [3, 12, None]
     assert df.filter(cpl.predicate(spec(16), {"root_id": [34]})).height == 1
     assert df.filter(cpl.predicate(spec(16), {})).height == 3
+
+
+def test_partitionwise_join_predicates(make_table):
+    fine, coarse = make_table("fine", 64), make_table("coarse", 16)
+    steps = list(cpl.partitionwise_join_predicates([fine, coarse], on="root_id"))
+    assert [value for value, _ in steps] == list(range(16))
+    _, (fine_pred, coarse_pred) = steps[3]
+    assert fine_pred.meta.eq(pl.col("root_id_bucket").is_in([3, 19, 35, 51]))
+    assert coarse_pred.meta.eq(pl.col("root_id_bucket").is_in([3]))

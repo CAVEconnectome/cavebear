@@ -28,7 +28,7 @@ A cavebear table is an ordinary Delta table. Its partition spec is a JSON string
 
 Such a reader gets no pruning, though. A filter on a source column such as `post_pt_root_id` opens every file, because the reader cannot compute the partition values. The per-file min and max values do not help, because the hash spreads the IDs of each file over the full range. To prune, filter on the partition column too. The `predicate` functions in `cavebear.polars` and `cavebear.duckdb` give a filter on both columns, for the native scan of each engine.
 
-See [examples/polars_demo.py](examples/polars_demo.py) and [examples/duckdb_demo.py](examples/duckdb_demo.py). Each demo writes and reads a table first with the native engine calls and cavebear expressions, then with the cavebear shortcuts.
+See [examples/demo.py](examples/demo.py), a notebook with `# %%` cells. It writes and reads two tables with Polars, then with DuckDB, with the native engine calls and cavebear expressions. Where cavebear has a shortcut, the demo shows both ways.
 
 ## Roadmap
 

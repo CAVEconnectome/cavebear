@@ -1,17 +1,27 @@
 """DuckDB adapter: transforms and predicates as DuckDB SQL.
 
-The SQL plugs into the native DuckDB and deltalake calls::
+The SQL plugs into the native DuckDB and deltalake calls, in a query or in the
+relation API::
 
     register(con)
-    query = f"SELECT *, {partition_columns(dt)} FROM synapses"
-    write_deltalake(dt, con.sql(query), mode="append")
-    con.sql(f"SELECT * FROM delta_scan('{uri}') WHERE {predicate(dt, where)}")
+    write_deltalake(dt, rel.project(f"*, {partition_columns(dt)}"), mode="append")
+    con.sql(f"FROM delta_scan('{uri}')").filter(predicate(dt, where))
 
-``scan`` and ``scan_partitionwise`` are shortcuts for the second form.
+The filters are literal ``IN`` lists, so that DuckDB pushes them into the scan and
+skips files.
 
-The scans use ``delta_scan(uri, version => n)`` at the version of the given
-``DeltaTable``, so DuckDB reads the same snapshot as the partition spec. The filters
-are literal ``IN`` lists, so that DuckDB pushes them into the scan and skips files.
+For a partition-wise join, ``partitionwise_join_predicates`` gives one filter per table
+for each step, for the native scan::
+
+    for value, preds in partitionwise_join_predicates(tables, on):
+        scans = [
+            con.sql(f"FROM delta_scan('{dt.table_uri}')").filter(pred)
+            for dt, pred in zip(tables, preds)
+        ]
+
+``scan_delta_partitionwise_join`` is a shortcut for the scans. Its scans use
+``delta_scan(uri, version => n)`` at the version of each ``DeltaTable``, so DuckDB
+reads the same snapshot as the partition spec.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -21,7 +31,7 @@ import pyarrow as pa
 from deltalake import DeltaTable
 
 from .partition_spec import PartitionSpec
-from .table import as_partition_spec, iter_partitionwise, partition_values
+from .table import as_partition_spec, partition_values, partitionwise_join_values
 from .transforms import IcebergBucket, to_arrow_int64
 
 #: The name of the SQL function that ``register`` adds.
@@ -65,8 +75,8 @@ def partition_columns(table: DeltaTable | PartitionSpec) -> str:
 
     ``table`` is a ``DeltaTable`` or its partition spec. Each expression calls the
     function that ``register`` adds, and is named as its partition column. Put the
-    result after ``SELECT *,`` in a query on rows that have the source columns, then
-    write the relation with ``write_deltalake``.
+    result after ``*,`` in a select list or in ``rel.project``, on rows that have the
+    source columns, then write the relation with ``write_deltalake``.
     """
     spec = as_partition_spec(table)
     spec.require_known()
@@ -100,29 +110,32 @@ def _scan_sql(dt: DeltaTable, predicates: Sequence[str]) -> str:
     return sql + (" WHERE " + " AND ".join(predicates) if predicates else "")
 
 
-def scan(
-    con: duckdb.DuckDBPyConnection,
-    dt: DeltaTable,
-    where: Mapping[str, Sequence[int]] | None = None,
-) -> duckdb.DuckDBPyRelation:
-    """A ``delta_scan`` relation on the snapshot ``dt``, filtered with
-    ``predicate(dt, where)``."""
-    return con.sql(_scan_sql(dt, [predicate(dt, where)] if where else []))
+def partitionwise_join_predicates(
+    tables: Sequence[DeltaTable], on: str | Sequence[str], n: int | None = None
+) -> Iterator[tuple[int, list[str]]]:
+    """For each step of a partition-wise join, one SQL condition per table.
+
+    See ``cavebear.table.partitionwise_join_values``, which gives the same steps as lists of
+    partition values. Each condition keeps the partitions of its table that are nested
+    in the partition of the step, for example
+    ``"post_pt_root_id_bucket" IN (3, 19, 35, 51)``. Put each condition on a
+    ``delta_scan`` of its table, and join the scans of one step.
+    """
+    for value, filters in partitionwise_join_values(tables, on, n):
+        yield value, [" AND ".join(_in(name, v) for name, v in nested.items()) for nested in filters]
 
 
-def scan_partitionwise(
+def scan_delta_partitionwise_join(
     con: duckdb.DuckDBPyConnection,
     tables: Sequence[DeltaTable],
     on: str | Sequence[str],
     n: int | None = None,
 ) -> Iterator[tuple[int, list[duckdb.DuckDBPyRelation]]]:
-    """For each partition of a partition-wise join, one relation per table.
+    """For each step of a partition-wise join, one relation per table.
 
-    See ``cavebear.table.iter_partitionwise``. Join the relations of one partition,
-    then move on to the next.
+    The relations are ``delta_scan`` at the version of each table, with the
+    conditions of ``partitionwise_join_predicates``. Join the relations of one step, then
+    move on to the next.
     """
-    for value, filters in iter_partitionwise(tables, on, n):
-        yield value, [
-            con.sql(_scan_sql(dt, [_in(name, v) for name, v in nested.items()]))
-            for dt, nested in zip(tables, filters)
-        ]
+    for value, preds in partitionwise_join_predicates(tables, on, n):
+        yield value, [con.sql(_scan_sql(dt, [pred])) for dt, pred in zip(tables, preds)]

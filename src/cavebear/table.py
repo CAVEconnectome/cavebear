@@ -9,7 +9,7 @@ The engines meet the core at two places:
 - Reads use ``partition_values``, which turns source values into plain lists of
   partition values. Each engine adapter puts these lists in its own predicate.
 - Each engine adapter computes the partition columns with its own expressions, for
-  the native ``write_deltalake``. As a shortcut, ``write`` takes any object that
+  the native ``write_deltalake``. As a shortcut, ``write_delta`` takes any object that
   exports an Arrow stream (``__arrow_c_stream__``): a pyarrow table, a Polars
   DataFrame, a DuckDB relation. It adds the partition columns batch by batch and
   passes the stream to ``deltalake``.
@@ -116,29 +116,28 @@ def _with_partitions(
     return pa.RecordBatchReader.from_batches(schema, batches())
 
 
-def write(
+def write_delta(
     table: DeltaTable | str | Path,
     data: Any,
     *,
     mode: Literal["append", "overwrite"] = "append",
     storage_options: dict[str, str] | None = None,
-) -> DeltaTable:
+) -> None:
     """Write ``data`` to a Delta table with a partition spec.
 
     ``data`` is any object that exports an Arrow stream, such as a pyarrow table, a
     Polars DataFrame or a DuckDB relation. Collect a Polars LazyFrame first. The data
-    must not have the partition columns of the spec: ``write`` computes them from
+    must not have the partition columns of the spec: ``write_delta`` computes them from
     the source columns.
 
-    As with ``write_deltalake``, a ``DeltaTable`` argument moves to the new version.
-    The return value is that table, or a new ``DeltaTable`` for a URI argument.
+    As with ``write_deltalake``, a ``DeltaTable`` argument moves to the new version,
+    and the function returns ``None``.
     """
     if not isinstance(table, DeltaTable):
         table = DeltaTable(str(table), storage_options=storage_options)
     spec = partition_spec(table)
     reader = _with_partitions(pa.RecordBatchReader.from_stream(data), spec, _arrow_schema(table))
     write_deltalake(table, reader, mode=mode)
-    return table
 
 
 def nested_partitions(value: int, coarse_n: int, fine_n: int) -> list[int]:
@@ -163,7 +162,7 @@ def _nested_filter(
     """For each ``iceberg_bucket`` field on ``source``, its partitions nested in
     partition ``value`` of ``bucket[coarse_n]``."""
     # NOTE: partition-wise joins support only iceberg_bucket fields, here and in the
-    # default ``n`` of ``iter_partitionwise``. To add another transform, such as
+    # default ``n`` of ``partitionwise_join_values``. To add another transform, such as
     # neuroglancer_uint64_sharded_v1 (nested by ``shard_bits`` when ``hash``,
     # ``preshift_bits`` and ``minishard_bits`` are equal), give each transform its
     # own partition count and nesting rule, and check that all fields of a join have
@@ -174,7 +173,7 @@ def _nested_filter(
     return {f.name: nested_partitions(value, coarse_n, f.transform.n_buckets) for f in fields}
 
 
-def iter_partitionwise(
+def partitionwise_join_values(
     tables: Sequence[DeltaTable], on: str | Sequence[str], n: int | None = None
 ) -> Iterator[tuple[int, list[dict[str, list[int]]]]]:
     """The partition filters of a partition-wise join, one partition at a time.
