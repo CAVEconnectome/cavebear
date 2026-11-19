@@ -1,6 +1,6 @@
-<p align="center"><img src="docs/assets/cavebear-lockup.svg" alt="cavebear" height="88"></p>
+<p align="center"><img src="docs/assets/cavebear-lockup.svg" alt="cavebear" height="120"></p>
 
-CAVE 🤝 data lakehouse
+CAVE 🤝 data lakehouse table formats
 
 ## Why
 
