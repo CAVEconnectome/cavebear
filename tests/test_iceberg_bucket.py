@@ -4,7 +4,7 @@ import pytest
 from pyiceberg_core import transform as iceberg
 
 from cavebear import IcebergBucket
-from cavebear.transforms import parse_transform
+from cavebear.transforms import UnknownTransform, parse_transform
 
 #: The test vectors in docs/specs/iceberg_bucket.md:
 #: (int64 value, uint64 view or None, murmur3_x86_32, {n_buckets: bucket}).
@@ -66,8 +66,52 @@ def test_dict_round_trip():
     assert IcebergBucket(64).to_dict() == data
 
 
-def test_rejects_unknown_members_and_types():
+def test_rejects_unknown_members():
     with pytest.raises(ValueError):
         parse_transform({"@type": "iceberg_bucket", "n_buckets": 64, "seed": 1})
-    with pytest.raises(ValueError):
-        parse_transform({"@type": "neuroglancer_uint64_sharded_v1", "shard_bits": 4})
+
+
+def test_keeps_unknown_types():
+    raw = {"@type": "neuroglancer_uint64_sharded_v1", "shard_bits": 4}
+    with pytest.warns(UserWarning, match="neuroglancer_uint64_sharded_v1"):
+        assert parse_transform(raw) == UnknownTransform(raw)
+
+
+@pytest.mark.parametrize("n", [1, 16, 1024, 2**30])
+def test_array_matches_pyiceberg_core_and_scalar(n):
+    rng = np.random.default_rng(n)
+    values = pa.array(rng.integers(-(2**63), 2**63, size=10_000, dtype=np.int64))
+    got = IcebergBucket(n).apply(values)
+    assert got.type == pa.int32()
+    assert got.to_pylist() == iceberg.bucket(values, n).to_pylist()
+    assert got.to_pylist()[:500] == [IcebergBucket(n).bucket(v) for v in values.to_pylist()[:500]]
+
+
+def test_array_vectors():
+    signed = pa.array([v for v, *_ in VECTORS], pa.int64())
+    unsigned = signed.view(pa.uint64())
+    for n in (16, 64, 1024):
+        expected = [buckets[n] for *_, buckets in VECTORS]
+        assert IcebergBucket(n).apply(signed).to_pylist() == expected
+        assert IcebergBucket(n).apply(unsigned).to_pylist() == expected
+
+
+@pytest.mark.parametrize("kind", [pa.int8(), pa.int16(), pa.int32(), pa.uint8(), pa.uint16(), pa.uint32()])
+def test_array_small_integer_types(kind):
+    values = pa.array([0, 1, 34, 100], kind)
+    expected = [IcebergBucket(64).bucket(v) for v in values.to_pylist()]
+    assert IcebergBucket(64).apply(values).to_pylist() == expected
+
+
+def test_array_nulls_slices_and_chunks():
+    values = pa.array([34, None, 0, 1], pa.int64())
+    assert IcebergBucket(16).apply(values).to_pylist() == [3, None, 12, 4]
+    assert IcebergBucket(16).apply(values.slice(2)).to_pylist() == [12, 4]
+    chunked = pa.chunked_array([values.slice(0, 2), values.slice(2)])
+    got = IcebergBucket(16).apply(chunked)
+    assert isinstance(got, pa.ChunkedArray) and got.to_pylist() == [3, None, 12, 4]
+
+
+def test_array_rejects_non_integers():
+    with pytest.raises(TypeError):
+        IcebergBucket(16).apply(pa.array([1.0]))

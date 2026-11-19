@@ -43,6 +43,14 @@ bucket = (h & 0x7FFFFFFF) % n_buckets
 where `int64_le_bytes` is the 8-byte little-endian encoding of the converted value.
 Because `n_buckets` is a power of two, `bucket = h & (n_buckets - 1)`.
 
+## Partition column
+
+The partition column has type `int32`. Its values are in the range `[0, n_buckets)`,
+and a null source value gives a null. Reasons:
+
+- Iceberg defines the result type of `bucket[N]` as `int`, a 32-bit signed integer.
+- `n_buckets` is at most `2**30`, so every bucket number fits.
+
 ## Test vectors
 
 Each row gives a value, the signed 32-bit hash, and the bucket for three values of

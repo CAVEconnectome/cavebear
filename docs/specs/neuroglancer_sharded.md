@@ -57,6 +57,13 @@ The bucket number equals the Neuroglancer shard number: bits
 `[minishard_bits, minishard_bits + shard_bits)` of the hashed ID. The minishard number
 is not stored.
 
+## Partition column
+
+TODO: the type of the partition column is not settled, because this transform has no
+reference implementation yet. `shard_bits` is at most 31, so `int32` holds every
+shard number. That makes `int32`, as in [iceberg_bucket.md](./iceberg_bucket.md), the
+likely choice.
+
 ## Test vectors
 
 TODO: generate vectors for both `"hash"` values and check them against Neuroglancer

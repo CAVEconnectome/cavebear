@@ -6,15 +6,22 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
+    # 1.6 is the version that tests/test_delta_configuration.py checks.
+    "deltalake>=1.6",
     "mmh3",
-    "obstore",
+    "numpy>=1.26",
+    # RecordBatchReader.from_stream needs pyarrow 15.
+    "pyarrow>=15",
 ]
+
+[project.optional-dependencies]
+polars = ["polars>=1.30"]
+duckdb = ["duckdb>=2.0"]
 
 [dependency-groups]
 dev = [
-    "deltalake",
-    "numpy",
-    "pyarrow",
+    "duckdb>=2.0.0",
+    "polars>=2.1.0",
     "pyiceberg-core",
     "pytest",
 ]

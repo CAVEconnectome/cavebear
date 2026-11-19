@@ -66,14 +66,15 @@ Iceberg, a reader that does not recognize a transform's `"@type"` must ignore th
 partition field, and must not use it for file pruning or bucket-aligned joins. Writers
 must not write to a table whose layout contains a transform they do not recognize.
 
-## Bucket values
+## Partition values
 
-Every transform maps a source value to a _bucket number_:
+Every transform maps a source value to a _partition value_:
 
-- The bucket number is an integer in the range `[0, n_buckets)`, where `n_buckets`
-  is defined by the transform and is always a power of two.
-- Each partition column described by the layout has type `int32`.
-- A null source value maps to a null bucket number.
+- Each transform spec defines the type of its partition column and the range of its
+  partition values. A partition column that the layout describes must have the type
+  that its transform defines.
+- A null source value maps to a null partition value.
+
 
 ## Nesting
 

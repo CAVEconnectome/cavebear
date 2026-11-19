@@ -1,0 +1,97 @@
+import re
+
+import pyarrow as pa
+import pytest
+from deltalake import DeltaTable
+
+duckdb = pytest.importorskip("duckdb")
+
+import cavebear  # noqa: E402
+from cavebear import IcebergBucket  # noqa: E402
+from cavebear import duckdb as cdd  # noqa: E402
+
+from conftest import synapses  # noqa: E402
+
+
+def files_read(con, relation) -> int:
+    profile = con.sql("EXPLAIN ANALYZE " + relation.sql_query()).fetchall()[0][1]
+    return int(re.search(r"Total Files Read: (\d+)", profile).group(1))
+
+
+def sorted_rows(relation_or_table) -> list[tuple]:
+    if isinstance(relation_or_table, pa.Table):
+        return sorted(zip(*(c.to_pylist() for c in relation_or_table.columns)))
+    return sorted(relation_or_table.fetchall())
+
+
+def test_scan_matches_plain_filter_and_prunes(make_table):
+    con = duckdb.connect()
+    data = synapses()
+    table = make_table("t", 16, data)
+    roots = data.column("root_id").to_pylist()[::150]
+    relation = cdd.scan(con, table, {"root_id": roots})
+    got = relation.select("root_id, value")
+    expected = data.filter(pa.compute.is_in(data.column("root_id"), pa.array(roots)))
+    assert sorted_rows(got) == sorted_rows(expected)
+    n_buckets = len(cavebear.partition_values(table, {"root_id": roots})["root_id_bucket"])
+    assert files_read(con, relation) == n_buckets < 16
+
+
+def test_scan_reads_the_table_version(make_table):
+    con = duckdb.connect()
+    table = make_table("t", 4, synapses(10))
+    old = DeltaTable(table.table_uri, version=table.version())
+    cavebear.write(table, synapses(10, seed=1))
+    # DuckDB reads the version of each DeltaTable, not the latest one.
+    assert len(cdd.scan(con, old).fetchall()) == 30
+    assert len(cdd.scan(con, table).fetchall()) == 60
+
+
+def test_registered_function():
+    con = duckdb.connect()
+    cdd.register(con)
+    rows = con.sql(
+        "SELECT cave_iceberg_bucket(x, 16) FROM (VALUES (34), (0), (NULL), (-34)) t(x)"
+    ).fetchall()
+    assert [r[0] for r in rows] == [3, 12, None, 13]
+    vectors = con.sql("SELECT cave_iceberg_bucket(x, 1024) FROM range(1000) t(x)").fetchall()
+    assert [r[0] for r in vectors] == [IcebergBucket(1024).bucket(v) for v in range(1000)]
+
+
+def test_write_from_duckdb(make_table):
+    con = duckdb.connect()
+    table = make_table("t", 8)
+    relation = con.from_arrow(synapses(20))
+    table = cavebear.write(table, relation)
+    assert len(cdd.scan(con, table).fetchall()) == 60
+
+
+def test_cross_engine(make_table):
+    pl = pytest.importorskip("polars")
+    from cavebear import polars as cpl
+
+    con = duckdb.connect()
+    data = synapses(50)
+    roots = data.column("root_id").to_pylist()[:6]
+    # Written with Polars, read with DuckDB.
+    a = cavebear.write(make_table("a", 16), pl.DataFrame(data))
+    # Written with DuckDB, read with Polars.
+    b = cavebear.write(make_table("b", 16), con.from_arrow(data))
+    from_duckdb = sorted_rows(cdd.scan(con, a, {"root_id": roots}))
+    from_polars = sorted(cpl.scan(b, {"root_id": roots}).collect().rows())
+    assert from_duckdb == from_polars
+    assert len(from_duckdb) == 6
+
+
+def test_scan_partitionwise(make_table):
+    con = duckdb.connect()
+    left = make_table("left", 16, synapses(100, seed=2))
+    right = make_table("right", 32, synapses(100, seed=2))
+    full = con.sql(
+        f"SELECT count(*) FROM ({cdd.scan(con, left).sql_query()}) l "
+        f"JOIN ({cdd.scan(con, right).sql_query()}) r USING (root_id)"
+    ).fetchall()[0][0]
+    total = 0
+    for _, (l, r) in cdd.scan_partitionwise(con, [left, right], on="root_id"):
+        total += l.join(r, "root_id").count("*").fetchall()[0][0]
+    assert total == full == 100 * 3 * 3
