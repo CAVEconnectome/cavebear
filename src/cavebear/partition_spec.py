@@ -1,4 +1,4 @@
-"""The partition spec of a cavebear table: which partition columns hold which transforms.
+"""The partition spec of a Delta table: which partition columns hold which transforms.
 
 See ``docs/specs/partition_spec.md``. The spec is stored as a JSON string under
 ``CONFIG_KEY`` in the Delta table ``configuration``.
@@ -14,12 +14,25 @@ import pyarrow as pa
 from .transforms import Transform, UnknownTransform, parse_transform
 
 CONFIG_KEY = "cave.partition_spec"
+"""The key of the partition spec in the Delta table ``configuration``."""
+
 SPEC_TYPE = "cave_partition_spec_v1"
+"""The ``"@type"`` of a partition spec object."""
 
 
 @dataclass(frozen=True)
 class PartitionField:
-    """One Delta partition column, computed by ``transform`` from ``source``."""
+    """One Delta partition column, computed by ``transform`` from ``source``.
+
+    Parameters
+    ----------
+    name
+        The name of the partition column.
+    source
+        The name of the source column.
+    transform
+        The transform that maps a source value to a partition value.
+    """
 
     name: str
     source: str
@@ -31,12 +44,32 @@ class PartitionField:
         return not isinstance(self.transform, UnknownTransform)
 
     def arrow_field(self) -> pa.Field:
-        """The Arrow field of the partition column. The field must be known."""
+        """The Arrow field of the partition column. The field must be known.
+
+        Returns
+        -------
+        field :
+            The field, with the name of the partition column and the
+            ``PARTITION_TYPE`` of the transform.
+        """
         return pa.field(self.name, self.transform.PARTITION_TYPE)
 
     def check_source(self, schema: pa.Schema) -> None:
-        """Raise ``ValueError`` if ``schema`` has no source column that the transform
-        accepts. For an unknown transform, only check that the column exists."""
+        """Check that ``schema`` has a source column that the transform accepts.
+
+        For an unknown transform, only check that the column exists.
+
+        Parameters
+        ----------
+        schema
+            The schema to check.
+
+        Raises
+        ------
+        ValueError
+            If the source column is missing, or if the transform does not accept its
+            type.
+        """
         if self.source not in schema.names:
             raise ValueError(f"source column {self.source!r} of {self.name!r} is not in the schema")
         source_type = schema.field(self.source).type
@@ -47,10 +80,23 @@ class PartitionField:
             )
 
     def to_dict(self) -> dict[str, Any]:
+        """The field as a partition field object (``docs/specs/partition_spec.md``)."""
         return {"name": self.name, "source": self.source, "transform": self.transform.to_dict()}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PartitionField":
+        """The field that a partition field object describes.
+
+        Parameters
+        ----------
+        data
+            A partition field object, as from ``to_dict``.
+
+        Raises
+        ------
+        ValueError
+            If ``data`` has unknown members.
+        """
         extra = set(data) - {"name", "source", "transform"}
         if extra:
             raise ValueError(f"unknown partition field members {sorted(extra)}")
@@ -63,7 +109,18 @@ class PartitionField:
 
 @dataclass(frozen=True)
 class PartitionSpec:
-    """The partition fields of one table."""
+    """The partition fields of one table.
+
+    Parameters
+    ----------
+    fields
+        The partition fields. Any sequence becomes a tuple.
+
+    Raises
+    ------
+    ValueError
+        If ``fields`` is empty, or if two fields have the same name.
+    """
 
     fields: tuple[PartitionField, ...]
 
@@ -76,13 +133,30 @@ class PartitionSpec:
             raise ValueError(f"partition field names are not unique: {names}")
 
     def fields_for(self, source: str) -> list[PartitionField]:
-        """The known partition fields that are computed from the column ``source``."""
+        """The known partition fields that are computed from a source column.
+
+        Parameters
+        ----------
+        source
+            The name of the source column.
+
+        Returns
+        -------
+        fields :
+            The known fields on ``source``, in spec order.
+        """
         return [f for f in self.fields if f.source == source and f.known]
 
     def require_known(self) -> None:
-        """Raise ``ValueError`` if a field has a transform that cavebear does not know.
+        """Check that cavebear knows the transform of each field.
 
-        Writers call this, because they cannot compute such a field.
+        Writers call this, because they cannot compute a field with an unknown
+        transform.
+
+        Raises
+        ------
+        ValueError
+            If a field has a transform that cavebear does not know.
         """
         unknown = [f"{f.name} ({f.transform.TYPE!r})" for f in self.fields if not f.known]
         if unknown:
@@ -91,10 +165,22 @@ class PartitionSpec:
     def add_partition_columns(self, schema: pa.Schema) -> pa.Schema:
         """``schema`` with the partition columns of the spec added at the end.
 
-        ``schema`` is the schema of data to write, which has the source columns but
-        not the partition columns, because cavebear computes them. Raises
-        ``ValueError`` if a transform is unknown, if ``schema`` already has a partition
-        column, or if a transform does not accept its source column.
+        Parameters
+        ----------
+        schema
+            The schema of data to write. It has the source columns but not the
+            partition columns, because cavebear computes them.
+
+        Returns
+        -------
+        schema :
+            The schema with the partition columns.
+
+        Raises
+        ------
+        ValueError
+            If a transform is unknown, if ``schema`` already has a partition column,
+            or if a transform does not accept its source column.
         """
         self.require_known()
         for f in self.fields:
@@ -104,14 +190,25 @@ class PartitionSpec:
         return pa.schema([*schema, *(f.arrow_field() for f in self.fields)])
 
     def validate_table(self, schema: pa.Schema, partition_columns: Sequence[str]) -> None:
-        """Raise ``ValueError`` if the spec does not describe a table.
+        """Check that the spec describes a table.
 
-        ``schema`` is the full schema of the table, and ``partition_columns`` its Delta
-        partition columns. Each field must name a partition column, and its source
-        must be a column of the table. For a known transform, the partition column
-        must also have the type that the transform defines, and the transform must
-        accept the source column. A table fails this check after an overwrite that
-        changes its partition columns, because the spec key survives it.
+        Each field must name a partition column, and its source must be a column of
+        the table. For a known transform, the partition column must also have the
+        type that the transform defines, and the transform must accept the source
+        column. A table fails this check after an overwrite that changes its
+        partition columns, because the spec key survives it.
+
+        Parameters
+        ----------
+        schema
+            The full schema of the table.
+        partition_columns
+            The Delta partition columns of the table.
+
+        Raises
+        ------
+        ValueError
+            If the spec does not describe the table.
         """
         for f in self.fields:
             if f.name not in partition_columns:
@@ -121,10 +218,24 @@ class PartitionSpec:
                 raise ValueError(f"partition column {f.name!r} is not {f.transform.PARTITION_TYPE}")
 
     def to_dict(self) -> dict[str, Any]:
+        """The spec as a partition spec object (``docs/specs/partition_spec.md``)."""
         return {"@type": SPEC_TYPE, "fields": [field.to_dict() for field in self.fields]}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PartitionSpec":
+        """The spec that a partition spec object describes.
+
+        Parameters
+        ----------
+        data
+            A partition spec object, as from ``to_dict``.
+
+        Raises
+        ------
+        ValueError
+            If ``data`` does not have the ``"@type"`` ``SPEC_TYPE``, has unknown
+            members, or has no list of fields.
+        """
         if data.get("@type") != SPEC_TYPE:
             raise ValueError(f"partition spec @type must be {SPEC_TYPE!r}, got {data.get('@type')!r}")
         extra = set(data) - {"@type", "fields"}
@@ -136,10 +247,18 @@ class PartitionSpec:
         return cls(fields=tuple(PartitionField.from_dict(field) for field in fields))
 
     def to_json(self) -> str:
+        """The spec as compact JSON text."""
         return json.dumps(self.to_dict(), separators=(",", ":"))
 
     @classmethod
     def from_json(cls, text: str | bytes) -> "PartitionSpec":
+        """The spec in JSON text, as from ``to_json``.
+
+        Parameters
+        ----------
+        text
+            The JSON text of a partition spec object.
+        """
         return cls.from_dict(json.loads(text))
 
     def to_configuration(self) -> dict[str, str]:
@@ -148,6 +267,17 @@ class PartitionSpec:
 
     @classmethod
     def from_configuration(cls, configuration: Mapping[str, str]) -> "PartitionSpec | None":
-        """The spec in a Delta table ``configuration``, or ``None`` without one."""
+        """The spec in a Delta table ``configuration``.
+
+        Parameters
+        ----------
+        configuration
+            The ``configuration`` of a Delta table.
+
+        Returns
+        -------
+        spec :
+            The spec under ``CONFIG_KEY``, or ``None`` if the key is not set.
+        """
         text = configuration.get(CONFIG_KEY)
         return None if text is None else cls.from_json(text)

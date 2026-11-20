@@ -1,10 +1,10 @@
 <p align="left"><img src="docs/assets/cavebear-lockup.svg" alt="cavebear" height="180"></p>
 
-CAVE 🤝 data lakehouse table formats
+CAVE 🤝 data lakehouse tables
 
 ## Why
 
-The [Connectome Annotation Versioning Engine (CAVE)](https://github.com/CAVEconnectome) is increasingly going to use [data lakehouse](https://www.databricks.com/blog/what-is-data-lakehouse)-style tooling, for instance, CAVE currently uses [Delta Lake](https://delta.io/) and may support [Apache Iceberg](https://iceberg.apache.org/). Both store large tables in parquet files written to object storage, but in a manner that makes them queryable and updatable by a variety of tools.
+The [Connectome Annotation Versioning Engine (CAVE)](https://github.com/CAVEconnectome) is increasingly using [data lakehouse](https://www.databricks.com/blog/what-is-data-lakehouse)-style tooling. For instance, CAVE currently uses [Delta Lake](https://delta.io/) and may support [Apache Iceberg](https://iceberg.apache.org/). Both store large tables in parquet files written to object storage, but in a manner that makes them queryable and updatable by a variety of tools.
 
 Part of the advantage of these approaches is that they allow us to leverage client-side
 query engines (such as [Polars](https://pola.rs/) or [DuckDB](https://duckdb.org/)) to handle much of the compute associated with reading and writing data. This means that we don't have to write these complicated tools from scratch

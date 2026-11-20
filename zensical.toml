@@ -1,0 +1,82 @@
+[project]
+site_name = "cavebear"
+site_description = "Specs and reference implementations for CAVE data lakehouse table layouts"
+repo_url = "https://github.com/CAVEconnectome/cavebear"
+repo_name = "CAVEconnectome/cavebear"
+docs_dir = "docs"
+extra_css = ["stylesheets/notebook.css"]
+nav = [
+  { "Home" = "index.md" },
+  { "Tutorial" = [
+    { "Delta tables with a partition spec" = "tutorial/demo.md" },
+    { "Partition-wise joins" = "tutorial/partitionwise_join.md" },
+  ] },
+  { "API" = [
+    { "Tables" = "api/table.md" },
+    { "Partition spec" = "api/partition_spec.md" },
+    { "Transforms" = "api/transforms.md" },
+    { "Polars adapter" = "api/polars.md" },
+    { "DuckDB adapter" = "api/duckdb.md" },
+  ] },
+  { "Specs" = [
+    { "Partition spec" = "specs/partition_spec.md" },
+    { "Iceberg bucket" = "specs/iceberg_bucket.md" },
+    { "Neuroglancer sharded" = "specs/neuroglancer_sharded.md" },
+  ] },
+]
+
+[project.theme]
+logo = "assets/cavebear-icon.svg"
+favicon = "assets/favicon.ico"
+features = ["content.code.copy", "navigation.sections", "navigation.footer"]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+md_in_html = {}
+toc = { permalink = true }
+pymdownx.details = {}
+pymdownx.highlight = {}
+pymdownx.inlinehilite = {}
+pymdownx.superfences = {}
+pymdownx.tasklist = { custom_checkbox = true }
+pymdownx.snippets = { base_path = ["."], check_paths = true }
+
+[project.plugins.mkdocstrings]
+custom_templates = "docs_templates"
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+inventories = [
+  "https://docs.python.org/3/objects.inv",
+  "https://arrow.apache.org/docs/objects.inv",
+  "https://docs.pola.rs/api/python/stable/objects.inv",
+  "https://numpy.org/doc/stable/objects.inv",
+]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "numpy"
+docstring_section_style = "table"
+show_signature_annotations = true
+separate_signature = true
+signature_crossrefs = true
+merge_init_into_class = true
+members_order = "source"
+filters = ["!^_"]
+show_root_heading = true
+show_root_full_path = true
+show_source = false
+show_symbol_type_heading = true
+show_symbol_type_toc = true
+show_if_no_docstring = false
+heading_level = 2

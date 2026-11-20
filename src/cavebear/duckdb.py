@@ -34,15 +34,20 @@ from .partition_spec import PartitionSpec
 from .table import as_partition_spec, partition_values, partitionwise_join_values
 from .transforms import IcebergBucket, to_arrow_int64
 
-#: The name of the SQL function that ``register`` adds.
 FUNCTION = "cave_iceberg_bucket"
+"""The name of the SQL function that ``register`` adds."""
 
 
 def register(con: duckdb.DuckDBPyConnection) -> None:
     """Add ``cave_iceberg_bucket(value BIGINT, n_buckets INTEGER) -> INTEGER`` to ``con``.
 
     A ``UBIGINT`` value at or above 2**63 does not fit ``BIGINT``. Cast such a column
-    to its ``BIGINT`` view first.
+    to its ``BIGINT`` view first. One query must use one ``n_buckets`` for all rows.
+
+    Parameters
+    ----------
+    con
+        The connection that gets the function.
     """
 
     def function(values: pa.ChunkedArray, n_buckets: pa.ChunkedArray) -> pa.ChunkedArray:
@@ -73,10 +78,25 @@ def _in(column: str, values: Sequence[int]) -> str:
 def partition_columns(table: DeltaTable | PartitionSpec) -> str:
     """A SQL select list with one expression per partition field of ``table``.
 
-    ``table`` is a ``DeltaTable`` or its partition spec. Each expression calls the
-    function that ``register`` adds, and is named as its partition column. Put the
-    result after ``*,`` in a select list or in ``rel.project``, on rows that have the
-    source columns, then write the relation with ``write_deltalake``.
+    Each expression calls the function that ``register`` adds, and is named as its
+    partition column. Put the result after ``*,`` in a select list or in
+    ``rel.project``, on rows that have the source columns, then write the relation
+    with ``write_deltalake``.
+
+    Parameters
+    ----------
+    table
+        A Delta table or its partition spec.
+
+    Returns
+    -------
+    select_list :
+        The expressions, separated by commas, in spec order.
+
+    Raises
+    ------
+    ValueError
+        If a field has a transform that cavebear does not know.
     """
     spec = as_partition_spec(table)
     spec.require_known()
@@ -91,10 +111,21 @@ def predicate(table: DeltaTable | PartitionSpec, where: Mapping[str, Sequence[in
     """A SQL condition that keeps the rows whose source columns have the values in
     ``where``.
 
-    ``where`` maps source columns to the values to keep. The condition tests the
-    partition columns, so that ``delta_scan`` opens only the matching files, and the
-    source columns, so that only the matching rows stay. The values are literal
-    ``IN`` lists, so that DuckDB pushes them into the scan.
+    The condition tests the partition columns, so that ``delta_scan`` opens only the
+    matching files, and the source columns, so that only the matching rows stay. The
+    values are literal ``IN`` lists, so that DuckDB pushes them into the scan.
+
+    Parameters
+    ----------
+    table
+        A Delta table or its partition spec.
+    where
+        Maps source columns to the values to keep.
+
+    Returns
+    -------
+    condition :
+        The condition, for a ``WHERE`` clause or ``rel.filter``.
     """
     predicates = [_in(name, v) for name, v in partition_values(table, where).items()]
     predicates += [
@@ -115,11 +146,28 @@ def partitionwise_join_predicates(
 ) -> Iterator[tuple[int, list[str]]]:
     """For each step of a partition-wise join, one SQL condition per table.
 
-    See ``cavebear.table.partitionwise_join_values``, which gives the same steps as lists of
-    partition values. Each condition keeps the partitions of its table that are nested
-    in the partition of the step, for example
-    ``"post_pt_root_id_bucket" IN (3, 19, 35, 51)``. Put each condition on a
-    ``delta_scan`` of its table, and join the scans of one step.
+    See ``cavebear.table.partitionwise_join_values``, which gives the same steps as
+    lists of partition values. Put each condition on a ``delta_scan`` of its table,
+    and join the scans of one step.
+
+    Parameters
+    ----------
+    tables
+        The tables to join.
+    on
+        The source column of the join in each table, or one name for all of them.
+    n
+        The partition count of the steps, as in
+        ``cavebear.table.partitionwise_join_values``.
+
+    Yields
+    ------
+    value :
+        The partition value of the step.
+    conditions :
+        One condition per table. Each keeps the partitions of its table that are
+        nested in the partition of the step, for example
+        ``"post_pt_root_id_bucket" IN (3, 19, 35, 51)``.
     """
     for value, filters in partitionwise_join_values(tables, on, n):
         yield value, [" AND ".join(_in(name, v) for name, v in nested.items()) for nested in filters]
@@ -133,9 +181,27 @@ def scan_delta_partitionwise_join(
 ) -> Iterator[tuple[int, list[duckdb.DuckDBPyRelation]]]:
     """For each step of a partition-wise join, one relation per table.
 
-    The relations are ``delta_scan`` at the version of each table, with the
-    conditions of ``partitionwise_join_predicates``. Join the relations of one step, then
-    move on to the next.
+    Join the relations of one step, then move on to the next.
+
+    Parameters
+    ----------
+    con
+        The connection that runs the scans.
+    tables
+        The tables to join.
+    on
+        The source column of the join in each table, or one name for all of them.
+    n
+        The partition count of the steps, as in
+        ``cavebear.table.partitionwise_join_values``.
+
+    Yields
+    ------
+    value :
+        The partition value of the step.
+    relations :
+        One ``delta_scan`` per table, at the version of that table, with the
+        conditions of ``partitionwise_join_predicates``.
     """
     for value, preds in partitionwise_join_predicates(tables, on, n):
         yield value, [con.sql(_scan_sql(dt, [pred])) for dt, pred in zip(tables, preds)]

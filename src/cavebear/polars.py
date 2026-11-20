@@ -12,9 +12,6 @@ for each step, for the native scan::
         scans = [pl.scan_delta(dt).filter(pred) for dt, pred in zip(tables, preds)]
 
 ``scan_delta_partitionwise_join`` is a shortcut for the scans.
-
-This adapter calls Polars directly, not narwhals. Narwhals cannot express the parts
-that differ by engine (see "no narwhals" in plans/decisions.md).
 """
 
 import operator
@@ -35,6 +32,18 @@ def partition_expr(expr: pl.Expr | str, transform: IcebergBucket) -> pl.Expr:
 
     Use it to add a partition column to a frame that does not have it, for example
     before a partition-wise join with a table that has a partition spec.
+
+    Parameters
+    ----------
+    expr
+        An integer expression, or the name of an integer column.
+    transform
+        The transform to apply.
+
+    Returns
+    -------
+    expr :
+        The partition values, with the ``PARTITION_TYPE`` of the transform.
     """
     if isinstance(expr, str):
         expr = pl.col(expr)
@@ -48,9 +57,23 @@ def partition_expr(expr: pl.Expr | str, transform: IcebergBucket) -> pl.Expr:
 def partition_columns(table: DeltaTable | PartitionSpec) -> list[pl.Expr]:
     """One expression per partition field of ``table``, named as its partition column.
 
-    ``table`` is a ``DeltaTable`` or its partition spec. Pass the result to
-    ``with_columns`` on a frame that has the source columns, then write the frame
-    with ``write_deltalake``.
+    Pass the result to ``with_columns`` on a frame that has the source columns, then
+    write the frame with ``write_deltalake``.
+
+    Parameters
+    ----------
+    table
+        A Delta table or its partition spec.
+
+    Returns
+    -------
+    exprs :
+        One expression per field, in spec order.
+
+    Raises
+    ------
+    ValueError
+        If a field has a transform that cavebear does not know.
     """
     spec = as_partition_spec(table)
     spec.require_known()
@@ -69,9 +92,20 @@ def _source_values(values: Sequence[int]) -> list[int]:
 def predicate(table: DeltaTable | PartitionSpec, where: Mapping[str, Sequence[int]]) -> pl.Expr:
     """A filter that keeps the rows whose source columns have the values in ``where``.
 
-    ``where`` maps source columns to the values to keep. The filter tests the
-    partition columns, so that ``pl.scan_delta`` opens only the matching files, and
-    the source columns, so that only the matching rows stay.
+    The filter tests the partition columns, so that ``pl.scan_delta`` opens only the
+    matching files, and the source columns, so that only the matching rows stay.
+
+    Parameters
+    ----------
+    table
+        A Delta table or its partition spec.
+    where
+        Maps source columns to the values to keep.
+
+    Returns
+    -------
+    predicate :
+        The filter, for ``LazyFrame.filter``.
     """
     predicates = [_in(name, v) for name, v in partition_values(table, where).items()]
     predicates += [_in(column, _source_values(values)) for column, values in where.items()]
@@ -83,11 +117,28 @@ def partitionwise_join_predicates(
 ) -> Iterator[tuple[int, list[pl.Expr]]]:
     """For each step of a partition-wise join, one filter per table.
 
-    See ``cavebear.table.partitionwise_join_values``, which gives the same steps as lists of
-    partition values. Each filter keeps the partitions of its table that are nested in
-    the partition of the step, for example
-    ``pl.col("post_pt_root_id_bucket").is_in([3, 19, 35, 51])``. Put each filter on
-    ``pl.scan_delta`` of its table, and join the scans of one step.
+    See ``cavebear.table.partitionwise_join_values``, which gives the same steps as
+    lists of partition values. Put each filter on ``pl.scan_delta`` of its table, and
+    join the scans of one step.
+
+    Parameters
+    ----------
+    tables
+        The tables to join.
+    on
+        The source column of the join in each table, or one name for all of them.
+    n
+        The partition count of the steps, as in
+        ``cavebear.table.partitionwise_join_values``.
+
+    Yields
+    ------
+    value :
+        The partition value of the step.
+    predicates :
+        One filter per table. Each keeps the partitions of its table that are
+        nested in the partition of the step, for example
+        ``pl.col("post_pt_root_id_bucket").is_in([3, 19, 35, 51])``.
     """
     for value, filters in partitionwise_join_values(tables, on, n):
         yield value, [
@@ -101,9 +152,26 @@ def scan_delta_partitionwise_join(
 ) -> Iterator[tuple[int, list[pl.LazyFrame]]]:
     """For each step of a partition-wise join, one scan per table.
 
-    The scans are ``pl.scan_delta`` with the filters of ``partitionwise_join_predicates``.
     Join the scans of one step, then move on to the next. Memory then holds one
     partition at a time.
+
+    Parameters
+    ----------
+    tables
+        The tables to join.
+    on
+        The source column of the join in each table, or one name for all of them.
+    n
+        The partition count of the steps, as in
+        ``cavebear.table.partitionwise_join_values``.
+
+    Yields
+    ------
+    value :
+        The partition value of the step.
+    scans :
+        One ``pl.scan_delta`` per table, with the filters of
+        ``partitionwise_join_predicates``.
     """
     for value, preds in partitionwise_join_predicates(tables, on, n):
         yield value, [pl.scan_delta(dt).filter(pred) for dt, pred in zip(tables, preds)]

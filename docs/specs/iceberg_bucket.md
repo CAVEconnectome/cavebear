@@ -87,7 +87,7 @@ array as `int64` before the call.
 
 ## Relation to Iceberg
 
-A cavebear partition field using this transform corresponds to the Iceberg partition
+A partition spec field that uses this transform corresponds to the Iceberg partition
 field:
 
 ```json

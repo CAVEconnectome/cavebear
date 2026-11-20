@@ -1,0 +1,72 @@
+/* Outputs of the tutorial notebooks (scripts/build_tutorial.py). */
+
+/* An output sits under its code cell, with a rule on the left. */
+.md-typeset .nb-output {
+  margin: -0.4em 0 1.2em;
+  padding-left: 0.8em;
+  border-left: 0.2rem solid var(--md-default-fg-color--lightest);
+}
+
+.md-typeset .nb-output pre,
+.md-typeset .nb-output pre > code {
+  background-color: transparent;
+}
+
+.md-typeset .nb-output pre > code {
+  padding: 0.2em 0;
+}
+
+.md-typeset .nb-output .md-code__nav,
+.md-typeset .nb-output .md-code__button {
+  display: none;
+}
+
+/* DataFrame tables, in the style of pandas in Jupyter. */
+.md-typeset .nb-html {
+  overflow-x: auto;
+  font-size: 0.7rem;
+}
+
+.md-typeset .nb-html small {
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset table.dataframe {
+  border-collapse: collapse;
+  border-spacing: 0;
+  border: none;
+  margin: 0.3em 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.md-typeset table.dataframe th,
+.md-typeset table.dataframe td {
+  padding: 0.35em 0.9em;
+  border: none;
+  text-align: right;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.md-typeset table.dataframe th {
+  font-weight: 700;
+}
+
+.md-typeset table.dataframe thead {
+  border-bottom: 1px solid var(--md-default-fg-color--light);
+}
+
+/* Polars gives the column types as a second header row. */
+.md-typeset table.dataframe thead tr + tr td {
+  color: var(--md-default-fg-color--light);
+  font-style: italic;
+  padding-top: 0;
+}
+
+.md-typeset table.dataframe tbody tr:nth-child(odd) {
+  background-color: var(--md-code-bg-color);
+}
+
+.md-typeset table.dataframe tbody tr:hover {
+  background-color: var(--md-accent-fg-color--transparent);
+}

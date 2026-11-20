@@ -2,15 +2,17 @@
 
 > Status: draft.
 
-A _cavebear table_ is a Delta table whose rows are partitioned by deterministic
+This spec adds a small piece of metadata to an ordinary Delta table. It is not a new
+table format. The table stays a standard Delta table that any Delta reader can read.
+
+The metadata is for a Delta table whose rows are partitioned by deterministic
 transforms of one or more source columns, for example a hash bucket of a segment ID.
 Delta records which columns a table is partitioned by, but not how those partition
-values were computed. The _partition spec_ of a cavebear table records that
-information, so that any reader can compute the partition value for a given source
+values were computed. The _partition spec_ records that information in the table
+metadata, so that any reader can compute the partition value for a given source
 value and use it for file pruning or partition-wise joins.
 
 The partition spec is table-level: every file in the table shares one partition spec.
-Changing the partition spec requires rewriting the table.
 
 ## Storage
 

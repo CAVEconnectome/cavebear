@@ -24,6 +24,7 @@ import numpy as np
 import pyarrow as pa
 
 MAX_N_BUCKETS = 2**30
+"""The largest bucket count of ``IcebergBucket``."""
 
 
 def _check_members(data: dict[str, Any], allowed: set[str]) -> None:
@@ -48,9 +49,17 @@ def _rotl(x: np.ndarray, r: int) -> np.ndarray:
 def murmur3_x86_32_int64(keys: np.ndarray) -> np.ndarray:
     """MurmurHash3 x86_32 with seed 0 of the 8 little-endian bytes of each key.
 
-    ``keys`` is an ``int64`` or ``uint64`` array. The result is the unsigned 32-bit
-    hash, as ``uint32``. numpy ``uint32`` arithmetic wraps modulo 2**32, as murmur3
-    requires.
+    numpy ``uint32`` arithmetic wraps modulo 2**32, as murmur3 requires.
+
+    Parameters
+    ----------
+    keys
+        An ``int64`` or ``uint64`` array.
+
+    Returns
+    -------
+    hashes :
+        The unsigned 32-bit hash of each key, as ``uint32``.
     """
     keys = np.ascontiguousarray(keys).view(np.uint64)
     h = np.zeros(keys.shape, dtype=np.uint32)
@@ -82,7 +91,25 @@ def to_arrow_int64(values: Any) -> pa.Array:
     """Python integers, or an integer Arrow array, as an ``int64`` Arrow array.
 
     Python integers in ``[2**63, 2**64)`` are ``uint64`` values, and become the
-    ``int64`` with the same 8 bytes.
+    ``int64`` with the same 8 bytes. A ``uint64`` Arrow array is reinterpreted the
+    same way.
+
+    Parameters
+    ----------
+    values
+        An iterable of Python integers or ``None``, or an integer Arrow array.
+
+    Returns
+    -------
+    array :
+        The values as ``int64``. ``None`` becomes null.
+
+    Raises
+    ------
+    ValueError
+        If a Python integer is outside the ``int64`` and ``uint64`` ranges.
+    TypeError
+        If an Arrow array does not have an integer type.
     """
     if isinstance(values, pa.Array):
         return _as_int64(values)
@@ -102,14 +129,25 @@ class IcebergBucket:
     """Apache Iceberg's ``bucket[N]`` transform, with N a power of two.
 
     See ``docs/specs/iceberg_bucket.md``.
+
+    Parameters
+    ----------
+    n_buckets
+        The bucket count N, a power of two in ``[1, 2**30]``.
+
+    Raises
+    ------
+    ValueError
+        If ``n_buckets`` is not a power of two in ``[1, 2**30]``.
     """
 
     n_buckets: int
 
     TYPE = "iceberg_bucket"
+    """The ``"@type"`` of the transform object."""
 
-    #: The Arrow type of the partition column (``docs/specs/iceberg_bucket.md``).
     PARTITION_TYPE = pa.int32()
+    """The Arrow type of the partition column (``docs/specs/iceberg_bucket.md``)."""
 
     def __post_init__(self):
         n = self.n_buckets
@@ -118,15 +156,40 @@ class IcebergBucket:
 
     @staticmethod
     def can_transform(source_type: pa.DataType) -> bool:
-        """Whether the transform accepts a source column of ``source_type``."""
+        """Whether the transform accepts a source column of ``source_type``.
+
+        Parameters
+        ----------
+        source_type
+            The Arrow type of the source column.
+
+        Returns
+        -------
+        accepts :
+            ``True`` for an integer type.
+        """
         return pa.types.is_integer(source_type)
 
     def bucket(self, value: int) -> int:
         """The bucket number for an integer source value.
 
-        This is the readable reference for ``apply``. Values in
-        ``[2**63, 2**64)`` are uint64 values, and hash as the int64 with the same 8
-        bytes.
+        This is the readable reference for ``apply``.
+
+        Parameters
+        ----------
+        value
+            The source value. Values in ``[2**63, 2**64)`` are uint64 values, and hash
+            as the int64 with the same 8 bytes.
+
+        Returns
+        -------
+        bucket :
+            The bucket number, in ``[0, n_buckets)``.
+
+        Raises
+        ------
+        ValueError
+            If ``value`` is outside the int64 and uint64 ranges.
         """
         if not -(2**63) <= value < 2**64:
             raise ValueError(f"value {value} is outside the int64 and uint64 ranges")
@@ -136,7 +199,21 @@ class IcebergBucket:
     def apply(self, values: pa.Array | pa.ChunkedArray) -> pa.Array | pa.ChunkedArray:
         """The bucket numbers of an integer Arrow array, as ``PARTITION_TYPE``.
 
-        A null value gives a null bucket. A chunked array gives a chunked array.
+        Parameters
+        ----------
+        values
+            The source values. A ``uint64`` array hashes as its ``int64`` view.
+
+        Returns
+        -------
+        buckets :
+            The bucket numbers. A null value gives a null bucket. A chunked array
+            gives a chunked array.
+
+        Raises
+        ------
+        TypeError
+            If ``values`` does not have an integer type.
         """
         if isinstance(values, pa.ChunkedArray):
             chunks = [self.apply(chunk) for chunk in values.chunks]
@@ -148,10 +225,23 @@ class IcebergBucket:
         return pa.array(buckets, self.PARTITION_TYPE, mask=mask)
 
     def to_dict(self) -> dict[str, Any]:
+        """The transform as a transform object (``docs/specs/iceberg_bucket.md``)."""
         return {"@type": self.TYPE, "n_buckets": self.n_buckets}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "IcebergBucket":
+        """The transform that a transform object describes.
+
+        Parameters
+        ----------
+        data
+            A transform object, as from ``to_dict``.
+
+        Raises
+        ------
+        ValueError
+            If ``data`` has unknown members, or a bad ``n_buckets``.
+        """
         _check_members(data, {"@type", "n_buckets"})
         return cls(n_buckets=data["n_buckets"])
 
@@ -162,27 +252,45 @@ class UnknownTransform:
 
     Readers keep it, so that the partition spec round-trips, but never use it for
     pruning. Writers refuse a table that has one.
+
+    Parameters
+    ----------
+    raw
+        The transform object, as stored in the spec.
     """
 
     raw: dict[str, Any]
 
     @property
     def TYPE(self) -> Any:
+        """The ``"@type"`` of the transform object."""
         return self.raw.get("@type")
 
     def to_dict(self) -> dict[str, Any]:
+        """A copy of the transform object."""
         return dict(self.raw)
 
 
 Transform = IcebergBucket | UnknownTransform
+"""A transform of a partition field."""
 
 TRANSFORMS: dict[str, type[IcebergBucket]] = {IcebergBucket.TYPE: IcebergBucket}
+"""The known transforms, by ``"@type"``."""
 
 
 def parse_transform(data: dict[str, Any]) -> Transform:
     """The transform that a partition spec's transform object describes.
 
-    An unknown ``"@type"`` gives an ``UnknownTransform`` and a warning.
+    Parameters
+    ----------
+    data
+        A transform object.
+
+    Returns
+    -------
+    transform :
+        The known transform, or an ``UnknownTransform`` with a warning if cavebear
+        does not know the ``"@type"``.
     """
     kind = data.get("@type")
     if kind not in TRANSFORMS:

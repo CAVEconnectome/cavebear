@@ -1,0 +1,7 @@
+{#- Leave out the docstring of the module that a `:::` directive renders. Each API page
+has its own introduction. -#}
+{% extends "_base/module.html.jinja" %}
+
+{% block docstring scoped %}
+  {% if not root %}{{ super() }}{% endif %}
+{% endblock docstring %}
