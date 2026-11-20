@@ -1,5 +1,6 @@
 [project]
 site_name = "cavebear"
+site_url = "https://www.caveconnecto.me/cavebear/"
 site_description = "Specs and reference implementations for CAVE data lakehouse table layouts"
 repo_url = "https://github.com/CAVEconnectome/cavebear"
 repo_name = "CAVEconnectome/cavebear"
