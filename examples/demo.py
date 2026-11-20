@@ -68,12 +68,27 @@ features.head()
 # synapses have 64 partitions, and the features have 16. Tables that are written at
 # different times, or that have different row sizes, often have different counts.
 # The spec is stored as JSON in the Delta table `configuration`.
+#
+# A spec maps each source column to its transform. The partition column gets the
+# default name `<source>_partition`, here `post_pt_root_id_partition`.
 
 # %%
-BUCKET = "post_pt_root_id_bucket"
-synapse_spec = PartitionSpec((PartitionField(BUCKET, "post_pt_root_id", IcebergBucket(64)),))
-feature_spec = PartitionSpec((PartitionField(BUCKET, "post_pt_root_id", IcebergBucket(16)),))
+synapse_spec = PartitionSpec({"post_pt_root_id": IcebergBucket(64)})
+feature_spec = PartitionSpec({"post_pt_root_id": IcebergBucket(16)})
 synapse_spec.to_dict()
+
+# %% [markdown]
+# The mapping is a shortcut for a tuple of `PartitionField`. Use the full form to give
+# a partition column a different name, or to put two transforms on one source column.
+# Two fields on one source need different names. This spec is not used below.
+
+# %%
+PartitionSpec(
+    (
+        PartitionField(source="post_pt_root_id", transform=IcebergBucket(64)),
+        PartitionField(source="post_pt_root_id", transform=IcebergBucket(1024), name="post_pt_root_id_1024"),
+    )
+).to_dict()
 
 # %% [markdown]
 # Two helpers for the checks below. `files_opened` counts the files that a read of

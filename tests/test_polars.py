@@ -17,10 +17,10 @@ def test_predicate_matches_plain_filter_and_prunes(make_table):
     roots = data.column("root_id").to_pylist()[::150]
     lf = pl.scan_delta(table).filter(cpl.predicate(table, {"root_id": roots}))
     expected = pl.DataFrame(data).filter(pl.col("root_id").is_in(roots))
-    got = lf.collect().drop("root_id_bucket")
+    got = lf.collect().drop("root_id_partition")
     assert got.sort("root_id", "value").equals(expected.sort("root_id", "value"))
     # The plan lists only the files of the buckets of the roots.
-    n_buckets = len(cavebear.partition_values(table, {"root_id": roots})["root_id_bucket"])
+    n_buckets = len(cavebear.partition_values(table, {"root_id": roots})["root_id_partition"])
     assert files_scanned(lf) == n_buckets < 16
 
 
@@ -79,7 +79,7 @@ def test_native_write(make_table):
     write_deltalake(table, df.with_columns(cpl.partition_columns(table)), mode="append")
     # The same partition columns as the shortcut write.
     expected_table = make_table("expected", 16, data)
-    columns = ["root_id", "value", "root_id_bucket"]
+    columns = ["root_id", "value", "root_id_partition"]
     got_all = pl.scan_delta(table).collect().select(columns).sort(columns)
     assert got_all.equals(pl.scan_delta(expected_table).collect().select(columns).sort(columns))
 
@@ -89,7 +89,7 @@ def test_expressions_take_a_spec():
 
     df = pl.DataFrame({"root_id": pl.Series([34, 0, None], dtype=pl.Int64)})
     df = df.with_columns(cpl.partition_columns(spec(16)))
-    assert df["root_id_bucket"].to_list() == [3, 12, None]
+    assert df["root_id_partition"].to_list() == [3, 12, None]
     assert df.filter(cpl.predicate(spec(16), {"root_id": [34]})).height == 1
     assert df.filter(cpl.predicate(spec(16), {})).height == 3
 
@@ -99,5 +99,5 @@ def test_partitionwise_join_predicates(make_table):
     steps = list(cpl.partitionwise_join_predicates([fine, coarse], on="root_id"))
     assert [value for value, _ in steps] == list(range(16))
     _, (fine_pred, coarse_pred) = steps[3]
-    assert fine_pred.meta.eq(pl.col("root_id_bucket").is_in([3, 19, 35, 51]))
-    assert coarse_pred.meta.eq(pl.col("root_id_bucket").is_in([3]))
+    assert fine_pred.meta.eq(pl.col("root_id_partition").is_in([3, 19, 35, 51]))
+    assert coarse_pred.meta.eq(pl.col("root_id_partition").is_in([3]))

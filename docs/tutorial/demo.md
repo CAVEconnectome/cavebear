@@ -83,10 +83,12 @@ synapses have 64 partitions, and the features have 16. Tables that are written a
 different times, or that have different row sizes, often have different counts.
 The spec is stored as JSON in the Delta table `configuration`.
 
+A spec maps each source column to its transform. The partition column gets the
+default name `<source>_partition`, here `post_pt_root_id_partition`.
+
 ```python
-BUCKET = "post_pt_root_id_bucket"
-synapse_spec = PartitionSpec((PartitionField(BUCKET, "post_pt_root_id", IcebergBucket(64)),))
-feature_spec = PartitionSpec((PartitionField(BUCKET, "post_pt_root_id", IcebergBucket(16)),))
+synapse_spec = PartitionSpec({"post_pt_root_id": IcebergBucket(64)})
+feature_spec = PartitionSpec({"post_pt_root_id": IcebergBucket(16)})
 synapse_spec.to_dict()
 ```
 
@@ -94,9 +96,36 @@ synapse_spec.to_dict()
 
 ```text
 {'@type': 'cave_partition_spec_v1',
- 'fields': [{'name': 'post_pt_root_id_bucket',
+ 'fields': [{'name': 'post_pt_root_id_partition',
    'source': 'post_pt_root_id',
    'transform': {'@type': 'iceberg_bucket', 'n_buckets': 64}}]}
+```
+
+</div>
+
+The mapping is a shortcut for a tuple of `PartitionField`. Use the full form to give
+a partition column a different name, or to put two transforms on one source column.
+Two fields on one source need different names. This spec is not used below.
+
+```python
+PartitionSpec(
+    (
+        PartitionField(source="post_pt_root_id", transform=IcebergBucket(64)),
+        PartitionField(source="post_pt_root_id", transform=IcebergBucket(1024), name="post_pt_root_id_1024"),
+    )
+).to_dict()
+```
+
+<div class="nb-output" markdown>
+
+```text
+{'@type': 'cave_partition_spec_v1',
+ 'fields': [{'name': 'post_pt_root_id_partition',
+   'source': 'post_pt_root_id',
+   'transform': {'@type': 'iceberg_bucket', 'n_buckets': 64}},
+  {'name': 'post_pt_root_id_1024',
+   'source': 'post_pt_root_id',
+   'transform': {'@type': 'iceberg_bucket', 'n_buckets': 1024}}]}
 ```
 
 </div>
@@ -141,7 +170,7 @@ synapses_dt.metadata().configuration
 <div class="nb-output" markdown>
 
 ```text
-{'cave.partition_spec': '{"@type":"cave_partition_spec_v1","fields":[{"name":"post_pt_root_id_bucket","source":"post_pt_root_id","transform":{"@type":"iceberg_bucket","n_buckets":64}}]}'}
+{'cave.partition_spec': '{"@type":"cave_partition_spec_v1","fields":[{"name":"post_pt_root_id_partition","source":"post_pt_root_id","transform":{"@type":"iceberg_bucket","n_buckets":64}}]}'}
 ```
 
 </div>
@@ -157,7 +186,7 @@ features.with_columns(cpl.partition_columns(features_dt)).head()
 
 <div class="nb-output" markdown>
 
-<div class="nb-html"><div><small>shape: (5, 5)</small><table class="dataframe"><thead><tr><th>id</th><th>post_pt_root_id</th><th>spine_volume</th><th>distance_to_soma</th><th>post_pt_root_id_bucket</th></tr><tr><td>i64</td><td>i64</td><td>f64</td><td>f64</td><td>i32</td></tr></thead><tbody><tr><td>3129899</td><td>864691136194057372</td><td>0.10106</td><td>261.237628</td><td>6</td></tr><tr><td>6663405</td><td>864691136726129803</td><td>1.49631</td><td>478.947168</td><td>12</td></tr><tr><td>2359581</td><td>864691136633759585</td><td>0.174421</td><td>122.33408</td><td>5</td></tr><tr><td>6302609</td><td>864691136349255449</td><td>0.175938</td><td>42.77822</td><td>3</td></tr><tr><td>7211515</td><td>864691135409021007</td><td>0.132908</td><td>323.418354</td><td>11</td></tr></tbody></table></div></div>
+<div class="nb-html"><div><small>shape: (5, 5)</small><table class="dataframe"><thead><tr><th>id</th><th>post_pt_root_id</th><th>spine_volume</th><th>distance_to_soma</th><th>post_pt_root_id_partition</th></tr><tr><td>i64</td><td>i64</td><td>f64</td><td>f64</td><td>i32</td></tr></thead><tbody><tr><td>3129899</td><td>864691136194057372</td><td>0.10106</td><td>261.237628</td><td>6</td></tr><tr><td>6663405</td><td>864691136726129803</td><td>1.49631</td><td>478.947168</td><td>12</td></tr><tr><td>2359581</td><td>864691136633759585</td><td>0.174421</td><td>122.33408</td><td>5</td></tr><tr><td>6302609</td><td>864691136349255449</td><td>0.175938</td><td>42.77822</td><td>3</td></tr><tr><td>7211515</td><td>864691135409021007</td><td>0.132908</td><td>323.418354</td><td>11</td></tr></tbody></table></div></div>
 
 </div>
 
@@ -183,7 +212,7 @@ cpl.predicate(synapses_dt, where)
 
 <div class="nb-output" markdown>
 
-<div class="nb-html">[(col("post_pt_root_id_bucket").is_in([[3, 4, 47]])) & (col("post_pt_root_id").is_in([[864691136540358433, 864691135103953073, 864691136945356460]]))]</div>
+<div class="nb-html">[(col("post_pt_root_id_partition").is_in([[3, 4, 47]])) & (col("post_pt_root_id").is_in([[864691136540358433, 864691135103953073, 864691136945356460]]))]</div>
 
 </div>
 
@@ -204,7 +233,7 @@ result.head()
 
 <div class="nb-output" markdown>
 
-<div class="nb-html"><div><small>shape: (5, 5)</small><table class="dataframe"><thead><tr><th>id</th><th>pre_pt_root_id</th><th>post_pt_root_id</th><th>size</th><th>post_pt_root_id_bucket</th></tr><tr><td>i64</td><td>i64</td><td>i64</td><td>i32</td><td>i32</td></tr></thead><tbody><tr><td>4010047</td><td>864691136224008348</td><td>864691135103953073</td><td>615</td><td>3</td></tr><tr><td>4039136</td><td>864691136428027589</td><td>864691135103953073</td><td>526</td><td>3</td></tr><tr><td>4070936</td><td>864691136085368357</td><td>864691135103953073</td><td>3546</td><td>3</td></tr><tr><td>4148989</td><td>864691136276443638</td><td>864691135103953073</td><td>1045</td><td>3</td></tr><tr><td>4208396</td><td>864691136609405782</td><td>864691135103953073</td><td>4302</td><td>3</td></tr></tbody></table></div></div>
+<div class="nb-html"><div><small>shape: (5, 5)</small><table class="dataframe"><thead><tr><th>id</th><th>pre_pt_root_id</th><th>post_pt_root_id</th><th>size</th><th>post_pt_root_id_partition</th></tr><tr><td>i64</td><td>i64</td><td>i64</td><td>i32</td><td>i32</td></tr></thead><tbody><tr><td>4010047</td><td>864691136224008348</td><td>864691135103953073</td><td>615</td><td>3</td></tr><tr><td>4039136</td><td>864691136428027589</td><td>864691135103953073</td><td>526</td><td>3</td></tr><tr><td>4070936</td><td>864691136085368357</td><td>864691135103953073</td><td>3546</td><td>3</td></tr><tr><td>4148989</td><td>864691136276443638</td><td>864691135103953073</td><td>1045</td><td>3</td></tr><tr><td>4208396</td><td>864691136609405782</td><td>864691135103953073</td><td>4302</td><td>3</td></tr></tbody></table></div></div>
 
 </div>
 
@@ -244,7 +273,7 @@ cdd.partition_columns(synapses_dt)
 <div class="nb-output" markdown>
 
 ```text
-'cave_iceberg_bucket("post_pt_root_id", 64) AS "post_pt_root_id_bucket"'
+'cave_iceberg_bucket("post_pt_root_id", 64) AS "post_pt_root_id_partition"'
 ```
 
 </div>
@@ -274,7 +303,7 @@ cdd.predicate(synapses_dt, where)
 <div class="nb-output" markdown>
 
 ```text
-'"post_pt_root_id_bucket" IN (3, 4, 47) AND "post_pt_root_id" IN (864691136540358433, 864691135103953073, 864691136945356460)'
+'"post_pt_root_id_partition" IN (3, 4, 47) AND "post_pt_root_id" IN (864691136540358433, 864691135103953073, 864691136945356460)'
 ```
 
 </div>
@@ -297,7 +326,7 @@ result.head()
 
 <div class="nb-output" markdown>
 
-<div class="nb-html"><div><small>shape: (5, 5)</small><table class="dataframe"><thead><tr><th>id</th><th>pre_pt_root_id</th><th>post_pt_root_id</th><th>size</th><th>post_pt_root_id_bucket</th></tr><tr><td>i64</td><td>i64</td><td>i64</td><td>i32</td><td>i32</td></tr></thead><tbody><tr><td>4010047</td><td>864691136224008348</td><td>864691135103953073</td><td>615</td><td>3</td></tr><tr><td>4039136</td><td>864691136428027589</td><td>864691135103953073</td><td>526</td><td>3</td></tr><tr><td>4070936</td><td>864691136085368357</td><td>864691135103953073</td><td>3546</td><td>3</td></tr><tr><td>4148989</td><td>864691136276443638</td><td>864691135103953073</td><td>1045</td><td>3</td></tr><tr><td>4208396</td><td>864691136609405782</td><td>864691135103953073</td><td>4302</td><td>3</td></tr></tbody></table></div></div>
+<div class="nb-html"><div><small>shape: (5, 5)</small><table class="dataframe"><thead><tr><th>id</th><th>pre_pt_root_id</th><th>post_pt_root_id</th><th>size</th><th>post_pt_root_id_partition</th></tr><tr><td>i64</td><td>i64</td><td>i64</td><td>i32</td><td>i32</td></tr></thead><tbody><tr><td>4010047</td><td>864691136224008348</td><td>864691135103953073</td><td>615</td><td>3</td></tr><tr><td>4039136</td><td>864691136428027589</td><td>864691135103953073</td><td>526</td><td>3</td></tr><tr><td>4070936</td><td>864691136085368357</td><td>864691135103953073</td><td>3546</td><td>3</td></tr><tr><td>4148989</td><td>864691136276443638</td><td>864691135103953073</td><td>1045</td><td>3</td></tr><tr><td>4208396</td><td>864691136609405782</td><td>864691135103953073</td><td>4302</td><td>3</td></tr></tbody></table></div></div>
 
 </div>
 

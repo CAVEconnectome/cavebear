@@ -153,8 +153,7 @@ def _with_partitions(
     def batches() -> Iterator[pa.RecordBatch]:
         for batch in reader:
             columns = dict(zip(batch.schema.names, batch.columns))
-            for f in spec.fields:
-                columns[f.name] = f.transform.apply(columns[f.source])
+            columns.update(spec.partition_arrays(batch))
             yield pa.RecordBatch.from_arrays([columns[n] for n in schema.names], schema=schema)
 
     return pa.RecordBatchReader.from_batches(schema, batches())

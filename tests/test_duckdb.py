@@ -37,7 +37,7 @@ def test_predicate_matches_plain_filter_and_prunes(make_table):
     got = relation.select("root_id, value")
     expected = data.filter(pa.compute.is_in(data.column("root_id"), pa.array(roots)))
     assert sorted_rows(got) == sorted_rows(expected)
-    n_buckets = len(cavebear.partition_values(table, {"root_id": roots})["root_id_bucket"])
+    n_buckets = len(cavebear.partition_values(table, {"root_id": roots})["root_id_partition"])
     assert files_read(con, relation) == n_buckets < 16
 
 
@@ -124,15 +124,15 @@ def test_native_write_and_scan(make_table):
     )
     expected = data.filter(pa.compute.is_in(data.column("root_id"), pa.array(roots)))
     assert sorted_rows(relation) == sorted_rows(expected)
-    n_buckets = len(cavebear.partition_values(table, {"root_id": roots})["root_id_bucket"])
+    n_buckets = len(cavebear.partition_values(table, {"root_id": roots})["root_id_partition"])
     assert files_read(con, relation) == n_buckets < 16
 
 
 def test_expressions_take_a_spec():
     from conftest import spec
 
-    assert cdd.partition_columns(spec(16)) == 'cave_iceberg_bucket("root_id", 16) AS "root_id_bucket"'
-    assert cdd.predicate(spec(16), {"root_id": [34]}) == '"root_id_bucket" IN (3) AND "root_id" IN (34)'
+    assert cdd.partition_columns(spec(16)) == 'cave_iceberg_bucket("root_id", 16) AS "root_id_partition"'
+    assert cdd.predicate(spec(16), {"root_id": [34]}) == '"root_id_partition" IN (3) AND "root_id" IN (34)'
     assert cdd.predicate(spec(16), {}) == "TRUE"
 
 
@@ -140,4 +140,4 @@ def test_partitionwise_join_predicates(make_table):
     fine, coarse = make_table("fine", 64), make_table("coarse", 16)
     steps = list(cdd.partitionwise_join_predicates([fine, coarse], on="root_id"))
     assert [value for value, _ in steps] == list(range(16))
-    assert steps[3][1] == ['"root_id_bucket" IN (3, 19, 35, 51)', '"root_id_bucket" IN (3)']
+    assert steps[3][1] == ['"root_id_partition" IN (3, 19, 35, 51)', '"root_id_partition" IN (3)']

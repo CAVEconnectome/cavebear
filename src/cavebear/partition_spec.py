@@ -20,23 +20,39 @@ SPEC_TYPE = "cave_partition_spec_v1"
 """The ``"@type"`` of a partition spec object."""
 
 
-@dataclass(frozen=True)
+DEFAULT_NAME_SUFFIX = "_partition"
+"""The suffix of the default partition column name: ``f"{source}_partition"``."""
+
+
+@dataclass(frozen=True, kw_only=True)
 class PartitionField:
     """One Delta partition column, computed by ``transform`` from ``source``.
 
+    All arguments are keyword-only.
+
     Parameters
     ----------
-    name
-        The name of the partition column.
     source
         The name of the source column.
     transform
         The transform that maps a source value to a partition value.
+    name
+        The name of the partition column. The default is ``f"{source}_partition"``.
+
+    Examples
+    --------
+    >>> from cavebear import IcebergBucket
+    >>> PartitionField(source="pt_root_id", transform=IcebergBucket(64)).name
+    'pt_root_id_partition'
     """
 
-    name: str
     source: str
     transform: Transform
+    name: str | None = None
+
+    def __post_init__(self):
+        if self.name is None:
+            object.__setattr__(self, "name", f"{self.source}{DEFAULT_NAME_SUFFIX}")
 
     @property
     def known(self) -> bool:
@@ -114,18 +130,47 @@ class PartitionSpec:
     Parameters
     ----------
     fields
-        The partition fields. Any sequence becomes a tuple.
+        The partition fields, as one of:
+
+        - A mapping from source column to transform. Each entry becomes a field with
+          the default name (``f"{source}_partition"``), in mapping order.
+        - A sequence of ``PartitionField``, for a custom name or for two fields on
+          one source column.
+
+        Either one becomes a tuple of ``PartitionField``.
 
     Raises
     ------
     ValueError
         If ``fields`` is empty, or if two fields have the same name.
+
+    Examples
+    --------
+    One field, with the default name:
+
+    >>> from cavebear import IcebergBucket
+    >>> spec = PartitionSpec({"pt_root_id": IcebergBucket(64)})
+    >>> [f.name for f in spec.fields]
+    ['pt_root_id_partition']
+
+    Two fields on one source column need the full form, with a name for at least one
+    of them:
+
+    >>> spec = PartitionSpec((
+    ...     PartitionField(source="pt_root_id", transform=IcebergBucket(64)),
+    ...     PartitionField(source="pt_root_id", transform=IcebergBucket(1024), name="pt_root_id_1024"),
+    ... ))
+    >>> [f.name for f in spec.fields]
+    ['pt_root_id_partition', 'pt_root_id_1024']
     """
 
     fields: tuple[PartitionField, ...]
 
     def __post_init__(self):
-        object.__setattr__(self, "fields", tuple(self.fields))
+        fields = self.fields
+        if isinstance(fields, Mapping):
+            fields = (PartitionField(source=source, transform=t) for source, t in fields.items())
+        object.__setattr__(self, "fields", tuple(fields))
         if not self.fields:
             raise ValueError("a partition spec needs at least one field")
         names = [field.name for field in self.fields]
@@ -188,6 +233,32 @@ class PartitionSpec:
                 raise ValueError(f"the data already has the partition column {f.name!r}; cavebear computes it")
             f.check_source(schema)
         return pa.schema([*schema, *(f.arrow_field() for f in self.fields)])
+
+    def partition_arrays(self, data: pa.RecordBatch | pa.Table) -> dict[str, pa.Array | pa.ChunkedArray]:
+        """The partition columns of the spec, computed from the source columns of ``data``.
+
+        Use it to add the partition columns to data that you write with your own
+        ``write_deltalake`` calls. ``data`` is not copied.
+
+        Parameters
+        ----------
+        data
+            A record batch or table that has the source columns but not the
+            partition columns.
+
+        Returns
+        -------
+        arrays :
+            Maps each partition column name to its values, in spec order. The values
+            are an ``Array`` for a record batch and a ``ChunkedArray`` for a table.
+
+        Raises
+        ------
+        ValueError
+            As ``add_partition_columns``, for the schema of ``data``.
+        """
+        self.add_partition_columns(data.schema)
+        return {f.name: f.transform.apply(data.column(f.source)) for f in self.fields}
 
     def validate_table(self, schema: pa.Schema, partition_columns: Sequence[str]) -> None:
         """Check that the spec describes a table.

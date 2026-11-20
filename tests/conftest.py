@@ -4,13 +4,13 @@ import pytest
 from deltalake import DeltaTable
 
 import cavebear
-from cavebear import IcebergBucket, PartitionField, PartitionSpec
+from cavebear import IcebergBucket, PartitionSpec
 
 SCHEMA = pa.schema([("root_id", pa.int64()), ("value", pa.float64())])
 
 
 def spec(n_buckets: int) -> PartitionSpec:
-    return PartitionSpec((PartitionField("root_id_bucket", "root_id", IcebergBucket(n_buckets)),))
+    return PartitionSpec({"root_id": IcebergBucket(n_buckets)})
 
 
 def synapses(n_roots=200, per_root=3, seed=0) -> pa.Table:

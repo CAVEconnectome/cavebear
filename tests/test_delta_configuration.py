@@ -18,7 +18,7 @@ VALUE = json.dumps(
         "@type": "cave_partition_spec_v1",
         "fields": [
             {
-                "name": "id_bucket",
+                "name": "id_partition",
                 "source": "id",
                 "transform": {"@type": "iceberg_bucket", "n_buckets": 4},
             }
@@ -29,7 +29,7 @@ DATA = pa.table(
     {
         "id": pa.array([1, 2, 3, 4], pa.int64()),
         "value": pa.array([1.0, 2.0, 3.0, 4.0]),
-        "id_bucket": pa.array([0, 1, 0, 3], pa.int32()),
+        "id_partition": pa.array([0, 1, 0, 3], pa.int32()),
     }
 )
 
@@ -44,7 +44,7 @@ def table(tmp_path) -> str:
     DeltaTable.create(
         uri,
         DATA.schema,
-        partition_by=["id_bucket"],
+        partition_by=["id_partition"],
         configuration={KEY: VALUE},
         raise_if_key_not_exists=False,
     )
@@ -103,7 +103,7 @@ def test_key_survives_a_partition_change(table):
 
 def test_set_on_existing_table(tmp_path):
     uri = str(tmp_path / "table")
-    write_deltalake(uri, DATA, partition_by=["id_bucket"])
+    write_deltalake(uri, DATA, partition_by=["id_partition"])
     with pytest.raises(DeltaError, match="Error parsing property"):
         DeltaTable(uri).alter.set_table_properties({KEY: VALUE})
     DeltaTable(uri).alter.set_table_properties({KEY: VALUE}, raise_if_not_exists=False)

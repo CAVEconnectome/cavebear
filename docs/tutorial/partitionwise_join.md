@@ -40,7 +40,7 @@ import polars as pl
 from polars.testing import assert_frame_equal
 
 import cavebear
-from cavebear import IcebergBucket, PartitionField, PartitionSpec
+from cavebear import IcebergBucket, PartitionSpec
 from cavebear import duckdb as cdd
 from cavebear import polars as cpl
 
@@ -97,9 +97,9 @@ different times, or that have different row sizes, often have different counts.
 The spec is stored as JSON in the Delta table `configuration`.
 
 ```python
-BUCKET = "post_pt_root_id_bucket"
-synapse_spec = PartitionSpec((PartitionField(BUCKET, "post_pt_root_id", IcebergBucket(64)),))
-feature_spec = PartitionSpec((PartitionField(BUCKET, "post_pt_root_id", IcebergBucket(16)),))
+synapse_spec = PartitionSpec({"post_pt_root_id": IcebergBucket(64)})
+feature_spec = PartitionSpec({"post_pt_root_id": IcebergBucket(16)})
+BUCKET = synapse_spec.fields[0].name  # the default name, "post_pt_root_id_partition"
 synapse_spec.to_dict()
 ```
 
@@ -107,7 +107,7 @@ synapse_spec.to_dict()
 
 ```text
 {'@type': 'cave_partition_spec_v1',
- 'fields': [{'name': 'post_pt_root_id_bucket',
+ 'fields': [{'name': 'post_pt_root_id_partition',
    'source': 'post_pt_root_id',
    'transform': {'@type': 'iceberg_bucket', 'n_buckets': 64}}]}
 ```
@@ -157,7 +157,7 @@ plain.head()
 
 <div class="nb-output" markdown>
 
-<div class="nb-html"><div><small>shape: (5, 4)</small><table class="dataframe"><thead><tr><th>post_pt_root_id</th><th>n_synapses</th><th>spine_volume</th><th>distance_to_soma</th></tr><tr><td>i64</td><td>u32</td><td>f64</td><td>f64</td></tr></thead><tbody><tr><td>864691135718421801</td><td>450</td><td>0.205432</td><td>249.513043</td></tr><tr><td>864691136927603115</td><td>382</td><td>0.209197</td><td>257.221801</td></tr><tr><td>864691135028818475</td><td>399</td><td>0.211163</td><td>253.31971</td></tr><tr><td>864691136676993014</td><td>374</td><td>0.2155</td><td>260.129374</td></tr><tr><td>864691136727572482</td><td>423</td><td>0.262905</td><td>258.362074</td></tr></tbody></table></div></div>
+<div class="nb-html"><div><small>shape: (5, 4)</small><table class="dataframe"><thead><tr><th>post_pt_root_id</th><th>n_synapses</th><th>spine_volume</th><th>distance_to_soma</th></tr><tr><td>i64</td><td>u32</td><td>f64</td><td>f64</td></tr></thead><tbody><tr><td>864691136124772776</td><td>403</td><td>0.218049</td><td>252.428983</td></tr><tr><td>864691135996558641</td><td>417</td><td>0.224784</td><td>251.597761</td></tr><tr><td>864691135047855631</td><td>368</td><td>0.234856</td><td>251.117611</td></tr><tr><td>864691136672595914</td><td>393</td><td>0.196389</td><td>236.446979</td></tr><tr><td>864691135923432826</td><td>391</td><td>0.225052</td><td>253.046563</td></tr></tbody></table></div></div>
 
 </div>
 
@@ -250,8 +250,8 @@ for dt, pred in zip(tables, preds):
 <div class="nb-output" markdown>
 
 ```text
-step 3, synapses: col("post_pt_root_id_bucket").is_in([[3, 19, … 51]])
-step 3, features: col("post_pt_root_id_bucket").is_in([[3]])
+step 3, synapses: col("post_pt_root_id_partition").is_in([[3, 19, … 51]])
+step 3, features: col("post_pt_root_id_partition").is_in([[3]])
 ```
 
 </div>
@@ -278,7 +278,7 @@ partitionwise.head()
 
 <div class="nb-output" markdown>
 
-<div class="nb-html"><div><small>shape: (5, 4)</small><table class="dataframe"><thead><tr><th>post_pt_root_id</th><th>n_synapses</th><th>spine_volume</th><th>distance_to_soma</th></tr><tr><td>i64</td><td>u32</td><td>f64</td><td>f64</td></tr></thead><tbody><tr><td>864691136208708915</td><td>368</td><td>0.228849</td><td>248.402103</td></tr><tr><td>864691135126905864</td><td>410</td><td>0.235532</td><td>232.714352</td></tr><tr><td>864691136320825628</td><td>364</td><td>0.242652</td><td>251.331632</td></tr><tr><td>864691135864416421</td><td>380</td><td>0.205985</td><td>251.006306</td></tr><tr><td>864691135010407556</td><td>414</td><td>0.209746</td><td>261.93996</td></tr></tbody></table></div></div>
+<div class="nb-html"><div><small>shape: (5, 4)</small><table class="dataframe"><thead><tr><th>post_pt_root_id</th><th>n_synapses</th><th>spine_volume</th><th>distance_to_soma</th></tr><tr><td>i64</td><td>u32</td><td>f64</td><td>f64</td></tr></thead><tbody><tr><td>864691135329723005</td><td>379</td><td>0.18885</td><td>263.305268</td></tr><tr><td>864691136114317759</td><td>440</td><td>0.229895</td><td>260.579551</td></tr><tr><td>864691136767509611</td><td>397</td><td>0.246031</td><td>252.843313</td></tr><tr><td>864691136152182991</td><td>419</td><td>0.211741</td><td>250.828895</td></tr><tr><td>864691136853742121</td><td>391</td><td>0.229737</td><td>247.919078</td></tr></tbody></table></div></div>
 
 </div>
 
@@ -288,8 +288,8 @@ Polars can also build the join once, and filter the joined frame in each step.
 Predicate pushdown moves each part of a filter below the join, to the scan that
 has its columns. So the scans still read only the files of the step.
 
-Both tables have a column `post_pt_root_id_bucket`. After a join on `id`, the
-column of the features is `post_pt_root_id_bucket_right`. The filter of a step
+Both tables have a column `post_pt_root_id_partition`. After a join on `id`, the
+column of the features is `post_pt_root_id_partition_right`. The filter of a step
 must test both columns, each with the partitions of its own table.
 `cavebear.partitionwise_join_values` gives these partitions as lists.
 
@@ -323,12 +323,12 @@ scans(joined.filter(step_filter(synapse_filter, feature_filter)))
 <div class="nb-output" markdown>
 
 ```text
-step 3: [(col("post_pt_root_id_bucket").is_in([[3, 19, … 51]])) & (col("post_pt_root_id_bucket_right").is_in([[3]]))]
+step 3: [(col("post_pt_root_id_partition").is_in([[3, 19, … 51]])) & (col("post_pt_root_id_partition_right").is_in([[3]]))]
 
 synapses: 4 files
-   SELECTION: col("post_pt_root_id_bucket").is_in([[3, 19, … 51]])
+   SELECTION: col("post_pt_root_id_partition").is_in([[3, 19, … 51]])
 features: 1 files
-   SELECTION: col("post_pt_root_id_bucket").alias("post_pt_root_id_bucket_right").is_in([[3]])
+   SELECTION: col("post_pt_root_id_partition").alias("post_pt_root_id_partition_right").is_in([[3]])
 ```
 
 </div>
@@ -351,14 +351,14 @@ scans(joined.filter(pl.col(BUCKET).is_in(synapse_filter[BUCKET])))
 
 ```text
 synapses: 4 files
-   SELECTION: col("post_pt_root_id_bucket").is_in([[3, 19, … 51]])
+   SELECTION: col("post_pt_root_id_partition").is_in([[3, 19, … 51]])
 features: 16 files
 ```
 
 </div>
 
 The bucket columns must be plain columns of the scans. A filter on a column that
-`with_columns` makes, for example `k = post_pt_root_id_bucket % 16`, stops at the
+`with_columns` makes, for example `k = post_pt_root_id_partition % 16`, stops at the
 `with_columns`, and then each scan reads all its files.
 
 With a filter on both tables, the steps give the same result as the partition-wise
@@ -447,13 +447,13 @@ for name, code in queries.items():
 
 ```text
 query                                       time  peak memory
-no query (imports and setup only)          0.00s       101 MB
-plain join                                 0.32s      1044 MB
-pl.concat of lazy steps, one collect       0.22s       852 MB
-the same, with parallel=False              0.22s       850 MB
-pl.collect_all of lazy steps               0.21s       830 MB
-one collect per step, then pl.concat       0.30s       436 MB
-join once, filter and collect per step     0.30s       440 MB
+no query (imports and setup only)          0.00s        99 MB
+plain join                                 0.30s      1024 MB
+pl.concat of lazy steps, one collect       0.15s       851 MB
+the same, with parallel=False              0.16s       861 MB
+pl.collect_all of lazy steps               0.23s       844 MB
+one collect per step, then pl.concat       0.24s       424 MB
+join once, filter and collect per step     0.25s       437 MB
 ```
 
 </div>
@@ -496,8 +496,8 @@ for dt, pred in zip(tables, preds):
 <div class="nb-output" markdown>
 
 ```text
-step 3, synapses: "post_pt_root_id_bucket" IN (3, 19, 35, 51)
-step 3, features: "post_pt_root_id_bucket" IN (3)
+step 3, synapses: "post_pt_root_id_partition" IN (3, 19, 35, 51)
+step 3, features: "post_pt_root_id_partition" IN (3)
 ```
 
 </div>
@@ -534,7 +534,7 @@ duckdb_partitionwise.head()
 
 <div class="nb-output" markdown>
 
-<div class="nb-html"><div><small>shape: (5, 4)</small><table class="dataframe"><thead><tr><th>post_pt_root_id</th><th>n_synapses</th><th>spine_volume</th><th>distance_to_soma</th></tr><tr><td>i64</td><td>u32</td><td>f64</td><td>f64</td></tr></thead><tbody><tr><td>864691135566434568</td><td>388</td><td>0.223754</td><td>262.361262</td></tr><tr><td>864691135459815742</td><td>422</td><td>0.257917</td><td>249.993543</td></tr><tr><td>864691135040337933</td><td>413</td><td>0.240597</td><td>250.728672</td></tr><tr><td>864691135485156203</td><td>371</td><td>0.204426</td><td>253.079474</td></tr><tr><td>864691136393677236</td><td>406</td><td>0.196735</td><td>240.905971</td></tr></tbody></table></div></div>
+<div class="nb-html"><div><small>shape: (5, 4)</small><table class="dataframe"><thead><tr><th>post_pt_root_id</th><th>n_synapses</th><th>spine_volume</th><th>distance_to_soma</th></tr><tr><td>i64</td><td>u32</td><td>f64</td><td>f64</td></tr></thead><tbody><tr><td>864691135248566552</td><td>396</td><td>0.233946</td><td>262.81106</td></tr><tr><td>864691135917760129</td><td>403</td><td>0.226536</td><td>239.580864</td></tr><tr><td>864691135465544769</td><td>400</td><td>0.227324</td><td>240.441258</td></tr><tr><td>864691135010407556</td><td>414</td><td>0.209746</td><td>261.93996</td></tr><tr><td>864691135775742944</td><td>409</td><td>0.199426</td><td>243.622401</td></tr></tbody></table></div></div>
 
 </div>
 

@@ -155,6 +155,38 @@ class IcebergBucket:
             raise ValueError(f"n_buckets must be a power of two in [1, 2**30], got {n!r}")
 
     @staticmethod
+    def round_up(n: int) -> int:
+        """The smallest valid bucket count that is at least ``n``.
+
+        Use it to turn an estimate, such as the table size divided by a target file
+        size, into a bucket count.
+
+        Parameters
+        ----------
+        n
+            The smallest bucket count that you want. A value below 1 gives 1.
+
+        Returns
+        -------
+        n_buckets :
+            A power of two in ``[1, 2**30]``.
+
+        Raises
+        ------
+        ValueError
+            If ``n`` is greater than ``2**30``.
+
+        Examples
+        --------
+        >>> [IcebergBucket.round_up(n) for n in (0, 1, 3, 64, 65)]
+        [1, 1, 4, 64, 128]
+        """
+        n = int(n)
+        if n > MAX_N_BUCKETS:
+            raise ValueError(f"no bucket count is at least {n}: the largest is 2**30")
+        return 1 if n <= 1 else 1 << (n - 1).bit_length()
+
+    @staticmethod
     def can_transform(source_type: pa.DataType) -> bool:
         """Whether the transform accepts a source column of ``source_type``.
 

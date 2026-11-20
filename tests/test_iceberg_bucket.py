@@ -115,3 +115,17 @@ def test_array_nulls_slices_and_chunks():
 def test_array_rejects_non_integers():
     with pytest.raises(TypeError):
         IcebergBucket(16).apply(pa.array([1.0]))
+
+
+@pytest.mark.parametrize(
+    "n, expected",
+    [(-5, 1), (0, 1), (1, 1), (2, 2), (3, 4), (64, 64), (65, 128), (2**30 - 1, 2**30), (2**30, 2**30)],
+)
+def test_round_up(n, expected):
+    assert IcebergBucket.round_up(n) == expected
+    IcebergBucket(expected)  # always a valid count
+
+
+def test_round_up_rejects_too_large():
+    with pytest.raises(ValueError, match="2\\*\\*30"):
+        IcebergBucket.round_up(2**30 + 1)

@@ -34,7 +34,7 @@ import polars as pl
 from polars.testing import assert_frame_equal
 
 import cavebear
-from cavebear import IcebergBucket, PartitionField, PartitionSpec
+from cavebear import IcebergBucket, PartitionSpec
 from cavebear import duckdb as cdd
 from cavebear import polars as cpl
 
@@ -78,9 +78,9 @@ features.head()
 # The spec is stored as JSON in the Delta table `configuration`.
 
 # %%
-BUCKET = "post_pt_root_id_bucket"
-synapse_spec = PartitionSpec((PartitionField(BUCKET, "post_pt_root_id", IcebergBucket(64)),))
-feature_spec = PartitionSpec((PartitionField(BUCKET, "post_pt_root_id", IcebergBucket(16)),))
+synapse_spec = PartitionSpec({"post_pt_root_id": IcebergBucket(64)})
+feature_spec = PartitionSpec({"post_pt_root_id": IcebergBucket(16)})
+BUCKET = synapse_spec.fields[0].name  # the default name, "post_pt_root_id_partition"
 synapse_spec.to_dict()
 # %% [markdown]
 # Create and write both tables. `write_delta` adds the partition columns.
@@ -213,8 +213,8 @@ partitionwise.head()
 # Predicate pushdown moves each part of a filter below the join, to the scan that
 # has its columns. So the scans still read only the files of the step.
 #
-# Both tables have a column `post_pt_root_id_bucket`. After a join on `id`, the
-# column of the features is `post_pt_root_id_bucket_right`. The filter of a step
+# Both tables have a column `post_pt_root_id_partition`. After a join on `id`, the
+# column of the features is `post_pt_root_id_partition_right`. The filter of a step
 # must test both columns, each with the partitions of its own table.
 # `cavebear.partitionwise_join_values` gives these partitions as lists.
 
@@ -260,7 +260,7 @@ scans(joined.filter(pl.col(BUCKET).is_in(synapse_filter[BUCKET])))
 
 # %% [markdown]
 # The bucket columns must be plain columns of the scans. A filter on a column that
-# `with_columns` makes, for example `k = post_pt_root_id_bucket % 16`, stops at the
+# `with_columns` makes, for example `k = post_pt_root_id_partition % 16`, stops at the
 # `with_columns`, and then each scan reads all its files.
 #
 # With a filter on both tables, the steps give the same result as the partition-wise

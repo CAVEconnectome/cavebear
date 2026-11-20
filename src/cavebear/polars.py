@@ -138,7 +138,7 @@ def partitionwise_join_predicates(
     predicates :
         One filter per table. Each keeps the partitions of its table that are
         nested in the partition of the step, for example
-        ``pl.col("post_pt_root_id_bucket").is_in([3, 19, 35, 51])``.
+        ``pl.col("post_pt_root_id_partition").is_in([3, 19, 35, 51])``.
     """
     for value, filters in partitionwise_join_values(tables, on, n):
         yield value, [

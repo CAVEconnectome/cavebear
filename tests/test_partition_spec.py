@@ -9,7 +9,7 @@ SYNAPSE_SPEC = {
     "@type": "cave_partition_spec_v1",
     "fields": [
         {
-            "name": "post_pt_root_id_bucket",
+            "name": "post_pt_root_id_partition",
             "source": "post_pt_root_id",
             "transform": {"@type": "iceberg_bucket", "n_buckets": 4},
         }
@@ -17,7 +17,7 @@ SYNAPSE_SPEC = {
 }
 
 SPEC = PartitionSpec(
-    (PartitionField("post_pt_root_id_bucket", "post_pt_root_id", IcebergBucket(4)),)
+    (PartitionField(source="post_pt_root_id", transform=IcebergBucket(4), name="post_pt_root_id_partition"),)
 )
 
 
@@ -58,3 +58,42 @@ def test_unknown_transform_warns_and_round_trips():
     with pytest.raises(ValueError, match="unknown transforms"):
         spec.require_known()
     SPEC.require_known()
+
+
+def test_default_name():
+    field = PartitionField(source="post_pt_root_id", transform=IcebergBucket(4))
+    assert field.name == "post_pt_root_id_partition"
+    assert field == SPEC.fields[0]
+    named = PartitionField(source="post_pt_root_id", transform=IcebergBucket(4), name="b")
+    assert named.name == "b"
+
+
+def test_field_arguments_are_keyword_only():
+    with pytest.raises(TypeError):
+        PartitionField("post_pt_root_id_partition", "post_pt_root_id", IcebergBucket(4))
+
+
+def test_mapping_spec_equals_full_form():
+    spec = PartitionSpec({"post_pt_root_id": IcebergBucket(4)})
+    assert spec == SPEC
+    assert spec.to_dict() == SPEC.to_dict() == SYNAPSE_SPEC
+
+
+def test_mapping_spec_keeps_order():
+    spec = PartitionSpec({"pre_pt_root_id": IcebergBucket(8), "post_pt_root_id": IcebergBucket(4)})
+    assert [(f.name, f.source, f.transform.n_buckets) for f in spec.fields] == [
+        ("pre_pt_root_id_partition", "pre_pt_root_id", 8),
+        ("post_pt_root_id_partition", "post_pt_root_id", 4),
+    ]
+    with pytest.raises(ValueError, match="at least one"):
+        PartitionSpec({})
+
+
+def test_two_fields_on_one_source_need_names():
+    def field(n, **kwargs):
+        return PartitionField(source="post_pt_root_id", transform=IcebergBucket(n), **kwargs)
+
+    with pytest.raises(ValueError, match="unique"):
+        PartitionSpec((field(4), field(16)))
+    spec = PartitionSpec((field(4), field(16, name="post_pt_root_id_16")))
+    assert [f.transform.n_buckets for f in spec.fields_for("post_pt_root_id")] == [4, 16]

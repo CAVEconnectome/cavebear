@@ -52,7 +52,11 @@ The partition spec is a JSON object with the following members:
 Each partition field object has the following members:
 
 - `"name"`: String. The name of the Delta partition column that stores the partition
-  value. It must appear in the Delta table's `partitionColumns`.
+  value. It must appear in the Delta table's `partitionColumns`. The recommended
+  name is `<source>_partition`, for example `pre_pt_root_id_partition`. The name
+  does not depend on the transform, so a table keeps its column names if its
+  transform changes. Two fields on one source need different names. A reader must
+  use the `"name"` that is stored, and must not derive it from `"source"`.
 - `"source"`: String. The name of the column the partition value is computed from. It
   must be a column of the table with a type accepted by the transform. As in
   Iceberg, more than one partition field may share the same source.
@@ -112,7 +116,7 @@ partitions:
   "@type": "cave_partition_spec_v1",
   "fields": [
     {
-      "name": "pre_pt_root_id_bucket",
+      "name": "pre_pt_root_id_partition",
       "source": "pre_pt_root_id",
       "transform": { "@type": "iceberg_bucket", "n_buckets": 64 }
     }
@@ -128,7 +132,6 @@ partitions:
 - A Delta `domainMetadata` domain with a custom name can keep the partition spec in
   the Delta log as its own action. Python `deltalake` cannot read or write domain
   metadata yet. When it can, will the partition spec move there?
-- Should a default partition column name, such as `<source>_bucket`, be recommended?
 - `"name"` and `"source"` refer to columns by name, so renaming either column makes
   the partition spec stale. Iceberg avoids this by referring to source columns by ID.
   Should the partition spec use Delta column mapping IDs (`delta.columnMapping.id`),

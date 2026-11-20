@@ -167,7 +167,7 @@ def partitionwise_join_predicates(
     conditions :
         One condition per table. Each keeps the partitions of its table that are
         nested in the partition of the step, for example
-        ``"post_pt_root_id_bucket" IN (3, 19, 35, 51)``.
+        ``"post_pt_root_id_partition" IN (3, 19, 35, 51)``.
     """
     for value, filters in partitionwise_join_values(tables, on, n):
         yield value, [" AND ".join(_in(name, v) for name, v in nested.items()) for nested in filters]
