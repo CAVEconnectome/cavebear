@@ -1,0 +1,64 @@
+# Run the tests on each push to main and on each pull request.
+# The "test" job uses the versions in uv.lock on each supported Python.
+# The "lowest" job uses the lowest versions that pyproject.toml allows,
+# so it fails if a lower bound is too low.
+# The "docs" job builds the documentation but does not publish it.
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --frozen
+      - run: uv run --no-sync pytest
+
+  lowest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          python-version: "3.11"
+      - run: uv venv --clear
+      # lowest-direct applies only to this install, so that the test tools
+      # in the next step do not resolve to their oldest releases.
+      - run: uv pip install --resolution lowest-direct ".[polars,duckdb]"
+      - run: uv pip install pytest pyiceberg-core
+      - run: uv pip list
+      - run: .venv/bin/python -m pytest
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.4.0
+      - run: uv sync --frozen --only-group docs
+      - run: uv run --no-sync zensical build --clean

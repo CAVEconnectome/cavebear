@@ -163,10 +163,10 @@ docs = [
 requires-dist = [
     { name = "deltalake", specifier = ">=1.6" },
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=2.0" },
-    { name = "mmh3" },
+    { name = "mmh3", specifier = ">=3" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.35.1" },
-    { name = "pyarrow", specifier = ">=15" },
+    { name = "pyarrow", specifier = ">=16,!=19.0.0" },
 ]
 provides-extras = ["polars", "duckdb"]
 
