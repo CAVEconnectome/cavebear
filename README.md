@@ -23,11 +23,10 @@ we are building here being more generally supported in the future, so parts of t
 
 ## Roadmap
 
-- [ ] Document the specs that are needed. To begin with, hash and spatial bucketing rules.
-- [ ] Create reference implementations that adhere to those specs.
-- [ ] Create utility functions for creating, reading, and comparing specs for things like nestedness.
-- [ ] Create table expressions that compute the appropriate transforms.
-- [ ] Create an API that enables query engines to appropriately prune queries based on transformed data.
+- [x] Document a spec for storing metadata about Iceberg-style ID -> partition hashing in the Delta Lake metadata.
+- [x] Create implementations for reading from and writing to Delta Lake tables with that partition hashing scheme.
+- [ ] Create tooling for partition-aware joins across tables, possibly with different partition specs.
+- [ ] Create a spec for storing spatial partitions nested within the ChunkedGraph spatial partitions.
 
 ## Collaboration
 
