@@ -18,9 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 polars = [
-    # Older versions fail with deltalake 1.6, or do not skip files in scan_delta (1.31).
-    # 1.35.0 has no runtime package on PyPI.
-    "polars>=1.35.1",
+    # deltalake 1.6.4 truncates timestamp stats to milliseconds. Older polars then skips
+    # files with matching rows in scan_delta (polars #30194).
+    "polars>=2.1",
 ]
 duckdb = ["duckdb>=2.0"]
 
